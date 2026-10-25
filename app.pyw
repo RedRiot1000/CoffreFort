@@ -19,6 +19,7 @@ sys.path.insert(0, HERE)
 import backup  # noqa: E402
 import autotype  # noqa: E402
 import bridge  # noqa: E402
+import mobile  # noqa: E402
 import nouveautes  # noqa: E402
 import updater  # noqa: E402
 import winsec  # noqa: E402
@@ -29,7 +30,7 @@ AUTO_LOCK_SECONDS = 5 * 60
 HELLO_MAX_HOURS = 12
 CLIPBOARD_CLEAR_SECONDS = 20
 MIN_MASTER_LENGTH = 12
-PROGRAM_FILES = ("app.pyw", "vault.py", "bridge.py", "backup.py", "updater.py", "autotype.py", "winsec.py", "nouveautes.py")
+PROGRAM_FILES = ("app.pyw", "vault.py", "bridge.py", "backup.py", "updater.py", "autotype.py", "winsec.py", "nouveautes.py", "mobile.py")
 UPDATE_CHECK_MS = 3000
 UPDATE_SETTLE_SECONDS = 5
 ONLINE_CHECK_MS = 6 * 3600 * 1000
@@ -327,6 +328,13 @@ class App(tk.Tk):
         except OSError:
             self.bridge = None  # extension indisponible, l'app reste utilisable
         self.after(100, self._bridge_tick)
+
+        self.mobile = None  # synchro Wi-Fi avec l'appli Android
+        self._mobile_error = None
+        self._mobile_refresh = None
+        if self.settings.get("mobile_sync"):
+            self._start_mobile()
+        self.after(200, self._mobile_tick)
 
         self._pending_target = None
         self.whats_new_on_unlock = False  # mis à True au lancement réel (pas dans les tests)
@@ -682,6 +690,7 @@ class App(tk.Tk):
         menu.add_command(label="Mot de passe maître…", command=self.change_master)
         menu.add_command(label="Clé de secours…", command=self.regenerate_recovery)
         menu.add_command(label="Extensions navigateur…", command=self.manage_extensions)
+        menu.add_command(label="Téléphone Android…", command=self.mobile_dialog)
         menu.add_command(label="Sauvegarde automatique…", command=self.backup_dialog)
         menu.add_command(label="Verrouillage et Windows Hello…", command=self.lock_dialog)
         if updater.enabled():
@@ -1768,6 +1777,8 @@ class App(tk.Tk):
     def _online_check(self):
         # Les fichiers téléchargés sont repérés par _update_tick (bandeau ou redémarrage auto).
         threading.Thread(target=startup_update_quiet, daemon=True).start()
+        if self.mobile:
+            threading.Thread(target=self._fetch_apk, daemon=True).start()
         self.after(ONLINE_CHECK_MS, self._online_check)
 
     def restart(self, auto=False):
@@ -2175,6 +2186,201 @@ class App(tk.Tk):
         if self.bridge is None:
             ttk.Label(f, text="⚠ Le pont navigateur n'a pas pu démarrer.", style="Warn.TLabel").pack(anchor="w", pady=8)
 
+    # ---------- téléphone Android ----------
+    def _start_mobile(self):
+        if self.mobile:
+            return True
+        server = mobile.MobileServer(self.vault.path, mobile.pc_id(self.settings))
+        try:
+            server.start()
+        except OSError as ex:
+            self._mobile_error = str(ex)
+            return False
+        server.set_phones(mobile.load_phones(self.settings))
+        self.mobile, self._mobile_error = server, None
+        backup.save_settings(self.settings)  # identifiant du PC créé au premier démarrage
+        if updater.enabled():
+            threading.Thread(target=self._fetch_apk, daemon=True).start()
+        return True
+
+    def _stop_mobile(self):
+        if self.mobile:
+            self.mobile.close()
+            self.mobile = None
+
+    @staticmethod
+    def _fetch_apk():
+        try:
+            updater.fetch_apk()  # le téléphone la récupère ensuite par le Wi-Fi
+        except Exception:  # noqa: BLE001 - hors ligne : on réessaiera
+            pass
+
+    def _mobile_tick(self):
+        if self.mobile:
+            try:
+                while True:
+                    kind, info, extra = self.mobile.events.get_nowait()
+                    if kind == "pair":
+                        self._mobile_pair_confirm(info, extra)
+                    elif kind == "synced":
+                        for p in self.settings.get("mobile_phones", []):
+                            if p.get("id") == info:
+                                p["last_sync"] = extra
+                                backup.save_settings(self.settings)
+                        if self._mobile_refresh:
+                            self._mobile_refresh()
+            except queue.Empty:
+                pass
+        self.after(200, self._mobile_tick)
+
+    def _mobile_pair_confirm(self, info, box):
+        def answer(accept):
+            if box["done"].is_set():
+                return
+            if accept:
+                mobile.store_phone(self.settings, info["id"], info["name"], info["secret"])
+                backup.save_settings(self.settings)
+                self.set_status(f"Téléphone associé : {info['name']}")
+            box["accept"] = accept
+            box["done"].set()
+            if d is not None and d.winfo_exists():
+                d.destroy()
+            if self._mobile_refresh:
+                self._mobile_refresh()
+
+        d = None
+        if not self.vault.unlocked:
+            answer(False)
+            return
+        self._bring_to_front()
+        d = self._dialog("Associer un téléphone")
+        d.bind("<Destroy>", lambda ev: ev.widget is d and answer(False), add="+")
+        d.protocol("WM_DELETE_WINDOW", lambda: answer(False))
+        d.after(mobile.CONFIRM_SECONDS * 1000, lambda: answer(False))
+        f = ttk.Frame(d, style="Panel.TFrame", padding=22)
+        f.pack(fill="both", expand=True)
+        ttk.Label(f, text="📱  Associer un téléphone", style="Panel.TLabel",
+                  font=("Segoe UI Semibold", 15)).pack(anchor="w")
+        ttk.Label(f, text=f"« {info['name']} » ({info['address']}) demande à recevoir ton coffre chiffré.\n"
+                          "Vérifie que ce code est bien affiché sur le téléphone :",
+                  style="Panel.TLabel", justify="left").pack(anchor="w", pady=(6, 10))
+        ttk.Label(f, text=info["code"], style="Code.TLabel").pack(pady=4)
+        ttk.Label(f, text="Code différent ou demande inattendue : refuse.", style="Muted.TLabel").pack(anchor="w", pady=(10, 0))
+        btns = ttk.Frame(f, style="Panel.TFrame")
+        btns.pack(fill="x", pady=(14, 0))
+        ttk.Button(btns, text="Associer", style="Accent.TButton", command=lambda: answer(True)).pack(side="right")
+        ttk.Button(btns, text="Refuser", command=lambda: answer(False)).pack(side="right", padx=6)
+
+    def mobile_dialog(self):
+        d = self._dialog("Téléphone Android")
+        f = ttk.Frame(d, style="Panel.TFrame", padding=20)
+        f.pack(fill="both", expand=True)
+        ttk.Label(f, text="📱  Téléphone Android", style="Panel.TLabel", font=("Segoe UI Semibold", 15)).pack(anchor="w")
+        ttk.Label(f, text="Consulte et copie tes mots de passe sur ton téléphone Android (sans pouvoir les modifier).\n"
+                          "Il garde une copie chiffrée du coffre, qui s'ouvre avec ton mot de passe maître, et se met\n"
+                          "à jour tout seul dès qu'il est sur le même Wi-Fi que ce PC, avec CoffreFort ouvert.",
+                  style="Panel.TLabel", justify="left").pack(anchor="w", pady=(6, 14))
+
+        step1 = ttk.Frame(f, style="Panel.TFrame")
+        step1.pack(fill="x")
+        if os.path.isfile(mobile.DOWNLOAD_QR):
+            d._qr = tk.PhotoImage(file=mobile.DOWNLOAD_QR)
+            tk.Label(step1, image=d._qr, bg=PANEL, bd=0).pack(side="left", padx=(0, 16))
+        col = ttk.Frame(step1, style="Panel.TFrame")
+        col.pack(side="left", fill="x", expand=True)
+        ttk.Label(col, text="1. Installer l'appli", style="Panel.TLabel", font=("Segoe UI Semibold", 11)).pack(anchor="w")
+        ttk.Label(col, text="Scanne ce code avec l'appareil photo du téléphone, télécharge CoffreFort.apk, puis ouvre-le. "
+                            "Android demande une seule fois d'autoriser l'installation depuis ton navigateur : accepte.\n"
+                            "Ensuite, l'appli se met à jour depuis ce PC.",
+                  style="Muted.TLabel", wraplength=380, justify="left").pack(anchor="w", pady=(2, 8))
+        ttk.Button(col, text="Copier le lien", command=lambda: self.copy_text(mobile.APK_URL, "Lien")).pack(anchor="w")
+
+        ttk.Label(f, text="2. Associer le téléphone", style="Panel.TLabel",
+                  font=("Segoe UI Semibold", 11)).pack(anchor="w", pady=(18, 4))
+        enabled = tk.BooleanVar(value=self.mobile is not None)
+
+        def toggle():
+            if enabled.get() and not self._start_mobile():
+                enabled.set(False)
+                messagebox.showerror("Synchro impossible", f"La synchro n'a pas pu démarrer : {self._mobile_error}", parent=d)
+                return
+            if not enabled.get():
+                self._stop_mobile()
+            self.settings["mobile_sync"] = enabled.get()
+            backup.save_settings(self.settings)
+            render()
+        ttk.Checkbutton(f, text="Synchroniser mon coffre avec mon téléphone par le Wi-Fi", variable=enabled,
+                        command=toggle).pack(anchor="w")
+        addr = ttk.Label(f, style="Muted.TLabel", justify="left", wraplength=520)
+        addr.pack(anchor="w", padx=(22, 0))
+        phones = ttk.Frame(f, style="Panel.TFrame")
+        phones.pack(fill="x", pady=(10, 0))
+        btns = ttk.Frame(f, style="Panel.TFrame")
+        btns.pack(fill="x", pady=(12, 0))
+
+        def start_pair():
+            if self.mobile:
+                self.mobile.start_pairing()
+                pair_state()
+        pair_btn = ttk.Button(btns, text="Associer un téléphone", style="Accent.TButton", command=start_pair)
+        pair_btn.pack(side="left")
+        pair_lbl = ttk.Label(btns, style="Muted.TLabel")
+        pair_lbl.pack(side="left", padx=10)
+        ttk.Button(btns, text="Fermer", command=d.destroy).pack(side="right")
+        ttk.Label(f, text="Si Windows demande d'autoriser Python sur le réseau, coche « Réseaux privés » et accepte.",
+                  style="Muted.TLabel").pack(anchor="w", pady=(14, 0))
+
+        def remove(p):
+            if messagebox.askyesno("Retirer", f"Retirer « {p['name']} » ? Il ne recevra plus les mises à jour du coffre.\n"
+                                              "(La copie déjà sur le téléphone y reste, chiffrée : « Dissocier » dans l'appli l'efface.)", parent=d):
+                self.settings["mobile_phones"] = [x for x in self.settings.get("mobile_phones", []) if x is not p]
+                backup.save_settings(self.settings)
+                if self.mobile:
+                    self.mobile.set_phones(mobile.load_phones(self.settings))
+                render()
+
+        def pair_state():
+            if not d.winfo_exists():
+                return
+            if self.mobile and self.mobile.pairing:
+                left = int(self.mobile.pairing_until - time.time())
+                pair_lbl.config(text=f"Sur le téléphone : « Rechercher mon PC »   ({left // 60}:{left % 60:02d})")
+                pair_btn.state(["disabled"])
+            else:
+                pair_lbl.config(text="" if self.mobile else "Active d'abord la synchro.")
+                pair_btn.state(["!disabled"] if self.mobile else ["disabled"])
+
+        def render():
+            if not d.winfo_exists():
+                return
+            addr.config(text="Adresse de ce PC, à taper sur le téléphone s'il ne le trouve pas : "
+                             + (", ".join(mobile.local_addresses()) or "aucune (pas de réseau)") if self.mobile else "")
+            for w in phones.winfo_children():
+                w.destroy()
+            for p in self.settings.get("mobile_phones", []):
+                row = ttk.Frame(phones, style="Panel.TFrame")
+                row.pack(fill="x", pady=2)
+                last = p.get("last_sync") or 0
+                when = time.strftime("synchronisé le %d/%m à %H:%M", time.localtime(last)) if last else "jamais synchronisé"
+                ttk.Label(row, text=f"📱  {p['name']}  ·  {when}", style="Panel.TLabel").pack(side="left")
+                ttk.Button(row, text="Retirer", style="Danger.TButton", command=lambda p=p: remove(p)).pack(side="right")
+            pair_state()
+
+        def tick():
+            if d.winfo_exists():
+                pair_state()
+                d.after(1000, tick)
+
+        def closed(ev):
+            if ev.widget is d:
+                self._mobile_refresh = None
+                if self.mobile:
+                    self.mobile.stop_pairing()
+        d.bind("<Destroy>", closed, add="+")
+        self._mobile_refresh = render
+        render()
+        tick()
+
     # ---------- verrouillage ----------
     def _touch(self, _=None):
         self.last_activity = time.time()
@@ -2185,6 +2391,8 @@ class App(tk.Tk):
         self.after(5000, self._auto_lock_tick)
 
     def lock(self):
+        if self.mobile:
+            self.mobile.stop_pairing()
         for d in list(self.dialogs):
             d.destroy()
         if self._clip_job:
@@ -2201,6 +2409,7 @@ class App(tk.Tk):
     def _quit(self):
         if self.bridge:
             self.bridge.close()
+        self._stop_mobile()
         if self.hotkey:
             self.hotkey.stop()
         self.clip.clear_if_ours()

@@ -70,6 +70,39 @@ def unprotect_memory(buf: bytearray):
     _memory(buf, crypt32.CryptUnprotectMemory)
 
 
+class _Blob(ctypes.Structure):
+    _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+
+crypt32.CryptProtectData.argtypes = [ctypes.POINTER(_Blob), wintypes.LPCWSTR, ctypes.POINTER(_Blob), ctypes.c_void_p,
+                                     ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(_Blob)]
+crypt32.CryptUnprotectData.argtypes = [ctypes.POINTER(_Blob), ctypes.c_void_p, ctypes.POINTER(_Blob), ctypes.c_void_p,
+                                       ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(_Blob)]
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+CRYPTPROTECT_UI_FORBIDDEN = 0x1
+
+
+def _dpapi(fn, data: bytes, *extra) -> bytes:
+    buf = ctypes.create_string_buffer(data, len(data))
+    src, out = _Blob(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))), _Blob()
+    if not fn(ctypes.byref(src), *extra, None, None, None, CRYPTPROTECT_UI_FORBIDDEN, ctypes.byref(out)):
+        raise OSError(ctypes.get_last_error(), fn.__name__)
+    try:
+        return ctypes.string_at(out.pbData, out.cbData)
+    finally:
+        kernel32.LocalFree(out.pbData)
+
+
+def protect_data(data: bytes) -> bytes:
+    """Chiffre pour le stockage : seul ce compte Windows, sur ce PC, pourra le relire (DPAPI)."""
+    return _dpapi(crypt32.CryptProtectData, data, "CoffreFort")
+
+
+def unprotect_data(data: bytes) -> bytes:
+    return _dpapi(crypt32.CryptUnprotectData, data, None)
+
+
 # Windows Hello via WinRT (UserConsentVerifier), appelé par PowerShell : aucune bibliothèque à installer.
 _HELLO_PS = r'''
 $ErrorActionPreference = 'Stop'

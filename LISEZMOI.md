@@ -144,3 +144,30 @@ CoffreFort détecte les clouds installés sur le PC. Tant qu'aucun dossier de sa
 « Sauvegarder dans OneDrive » (ou Google Drive, Dropbox, MEGA…) en un clic. On peut changer à tout moment dans
 ⚙ Réglages → Sauvegarde automatique. Sans cloud : OneDrive est inclus dans Windows (se connecter avec un compte Microsoft).
 Le coffre est copié tel quel, chiffré : le cloud ne voit jamais les mots de passe.
+
+## Téléphone Android (⚙ Réglages → Téléphone Android…)
+
+Consulte et copie tes mots de passe sur ton téléphone Android, même sans réseau. L'appli est en
+**lecture seule** : on ne peut ni modifier ni ajouter de compte depuis le téléphone.
+
+1. **Installer l'appli** : scanne le QR code de la fenêtre avec l'appareil photo du téléphone,
+   télécharge `CoffreFort.apk` et ouvre-le. Android demande une fois d'autoriser l'installation
+   depuis ton navigateur : accepte.
+2. **Associer** : coche « Synchroniser mon coffre avec mon téléphone par le Wi-Fi » (si Windows
+   demande d'autoriser Python sur le réseau : « Réseaux privés » → Autoriser), clique sur
+   « Associer un téléphone », puis dans l'appli « Rechercher mon PC ». Vérifie que le même code
+   à 6 chiffres s'affiche sur les deux écrans et clique sur « Associer » sur le PC.
+   Si le téléphone ne trouve pas le PC, tape l'adresse affichée dans la fenêtre.
+
+Ensuite :
+- Le téléphone se met à jour tout seul (même en arrière-plan, toutes les ~15 min) dès qu'il est
+  sur le même Wi-Fi que le PC avec CoffreFort ouvert, même verrouillé.
+- La copie sur le téléphone est **chiffrée comme sur le PC** : elle s'ouvre avec ton mot de passe
+  maître (ou ta clé de secours). L'empreinte peut le remplacer, mais le mot de passe maître reste
+  demandé au moins une fois par semaine. L'appli se referme dès que tu la quittes.
+- Rien ne passe par Internet : PC et téléphone se parlent directement sur ton Wi-Fi, avec un secret
+  échangé à l'association (un autre appareil du réseau ne peut pas récupérer le fichier).
+- Copier un mot de passe : il est effacé du presse-papiers après 30 secondes.
+- Si ton PC tombe en panne, le téléphone garde sa copie : elle reste lisible même si le PC ne le
+  reconnaît plus. Seul « Dissocier ce téléphone » dans l'appli l'efface.
+- Les nouvelles versions de l'appli arrivent par le PC : un bouton « Installer » apparaît dans l'appli.

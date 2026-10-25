@@ -29,6 +29,10 @@ TIMEOUT = 8
 MAX_ZIP = 10 * 1024 * 1024
 ALLOWED_SUFFIXES = (".py", ".pyw", ".bat", ".ps1", ".md", ".json", ".js", ".html", ".css", ".png")
 MACHINE_FILES = ("native/host.bat", "native/com.coffrefort.host.json")  # propres à chaque PC, jamais remplacés
+# L'appli Android est publiée à côté de l'archive (les anciennes versions refuseraient un .apk dedans) ;
+# elle n'est téléchargée que si la synchro avec un téléphone est activée.
+APK_REL = "mobile/CoffreFort.apk"
+MAX_APK = 40 * 1024 * 1024
 
 
 class UpdateError(Exception):
@@ -94,9 +98,7 @@ def _check_path(name):
         raise UpdateError(f"chemin refusé dans la mise à jour : {name!r}")
 
 
-def check(cfg):
-    """Renvoie le manifeste signé d'une version plus récente, ou None."""
-    ref = _ref(cfg)
+def _manifest(cfg, ref):
     data = _get(_url(cfg, "release/manifest.json", ref), 64 * 1024)
     sig = _get(_url(cfg, "release/manifest.sig", ref), 1024)
     try:
@@ -107,6 +109,13 @@ def check(cfg):
     m = json.loads(data)
     if m.get("format") != "coffrefort-update" or m.get("repo") != cfg["repo"]:
         raise UpdateError("manifeste inattendu")
+    return m
+
+
+def check(cfg):
+    """Renvoie le manifeste signé d'une version plus récente, ou None."""
+    ref = _ref(cfg)
+    m = _manifest(cfg, ref)
     if not isinstance(m.get("version"), int) or m["version"] <= cfg["version"]:
         return None
     if not re.fullmatch(r"release/coffrefort-\d+\.zip", str(m.get("zip", ""))):
@@ -149,6 +158,40 @@ def apply(cfg, m):
     finally:
         shutil.rmtree(STAGING, ignore_errors=True)
     return m["version"]
+
+
+def fetch_apk():
+    """Télécharge la dernière appli Android publiée, vérifiée par le manifeste signé.
+    Renvoie True si une nouvelle version a été posée dans mobile/."""
+    cfg = load_config()
+    if cfg is None:
+        return False
+    ref = _ref(cfg)
+    apk = _manifest(cfg, ref).get("apk")
+    if (not isinstance(apk, dict) or apk.get("path") != APK_REL or not isinstance(apk.get("version_code"), int)
+            or not re.fullmatch(r"[0-9a-f]{64}", str(apk.get("sha256", "")))):
+        return False
+    folder = os.path.join(HERE, "mobile")
+    apk_path, info_path = os.path.join(HERE, *APK_REL.split("/")), os.path.join(folder, "version.json")
+    try:
+        with open(info_path, encoding="utf-8") as f:
+            current = json.load(f)
+    except (OSError, ValueError):
+        current = {}
+    if os.path.isfile(apk_path) and (current.get("sha256") == apk["sha256"]
+                                     or current.get("version_code", 0) > apk["version_code"]):
+        return False
+    blob = _get(_url(cfg, APK_REL, ref), MAX_APK)
+    if hashlib.sha256(blob).hexdigest() != apk["sha256"]:
+        raise UpdateError("appli Android corrompue")
+    os.makedirs(folder, exist_ok=True)
+    with open(apk_path + ".tmp", "wb") as f:
+        f.write(blob)
+    os.replace(apk_path + ".tmp", apk_path)
+    with open(info_path, "w", encoding="utf-8") as f:
+        json.dump({"version_code": apk["version_code"], "version_name": str(apk.get("version_name", "")),
+                   "sha256": apk["sha256"]}, f)
+    return True
 
 
 def update_now():

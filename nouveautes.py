@@ -5,6 +5,11 @@
 """
 
 NOTES = [
+    (12, "Appli Android", [
+        "Consulte et copie tes mots de passe sur ton téléphone Android, même sans réseau (lecture seule).",
+        "Le téléphone se met à jour tout seul sur ton Wi-Fi, et s'ouvre avec ton mot de passe maître ou ton empreinte.",
+        "⚙ Réglages → Téléphone Android… pour l'installer et l'associer.",
+    ]),
     (11, "Pages de l'extension MEGA", [
         "Sur la page de connexion de l'extension MEGA (que le navigateur interdit de remplir), CoffreFort propose "
         "tes comptes MEGA avec des boutons « Copier ».",
