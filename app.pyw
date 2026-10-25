@@ -686,6 +686,10 @@ class App(tk.Tk):
         ttk.Button(top, text="🎲  Générateur", style="Ghost.TButton", command=self.open_generator).pack(side="right")
         ttk.Button(top, text="＋  Ajouter", style="Accent.TButton", command=self.add_entry).pack(side="right", padx=6)
 
+        # --- proposition de sauvegarde cloud (une fois, tant qu'aucun dossier n'est choisi)
+        if not self.settings.get("backup_dir") and not self.settings.get("backup_asked"):
+            self._cloud_banner()
+
         # --- statut (en bas)
         self.status = tk.Label(self.body, text="", bg=BG, fg=MUTED, anchor="w", padx=16, pady=6,
                                font=("Segoe UI", 9))
@@ -1588,6 +1592,46 @@ class App(tk.Tk):
             if threading.current_thread() is threading.main_thread():
                 self.set_status(f"⚠ Sauvegarde cloud échouée : {ex}")
 
+    def _cloud_banner(self):
+        clouds = backup.cloud_folders()
+        bar = tk.Frame(self.body, bg="#1f2a4a", padx=16, pady=8)
+        bar.pack(fill="x", padx=16, pady=(0, 10))
+        if clouds:
+            text = ("☁  Sauvegarde ton coffre dans le cloud : si ton PC tombe en panne, tu retrouveras tes mots de passe. "
+                    "Le coffre est copié chiffré, le cloud ne peut rien lire.")
+        else:
+            text = ("☁  Aucun cloud trouvé sur ce PC. Pour ne rien perdre si ton PC tombe en panne, active OneDrive "
+                    "(inclus dans Windows) ou installe Google Drive, puis choisis-le dans Réglages → Sauvegarde automatique.")
+        tk.Label(bar, text=text, bg="#1f2a4a", fg=FG, wraplength=1100, justify="left", anchor="w",
+                 font=("Segoe UI", 10)).pack(fill="x")
+        row = tk.Frame(bar, bg="#1f2a4a")
+        row.pack(fill="x", pady=(8, 0))
+
+        def close(asked=True):
+            if asked:
+                self.settings["backup_asked"] = True
+                backup.save_settings(self.settings)
+            bar.destroy()
+
+        def use(cloud):
+            self.settings["backup_dir"] = cloud["path"]
+            close()
+            self._auto_backup()
+            if self._backup_error:
+                messagebox.showerror("Sauvegarde", f"Impossible d'écrire dans {cloud['name']} : {self._backup_error}")
+            else:
+                self.refresh_list(select_id=self.current["id"] if self.current else None)
+                self.set_status(f"☁ Coffre sauvegardé dans {cloud['name']} : {cloud['path']}")
+        if clouds:
+            for cloud in clouds[:4]:
+                ttk.Button(row, text=f"Sauvegarder dans {cloud['name']}", style="Accent.TButton",
+                           command=lambda c=cloud: use(c)).pack(side="left", padx=(0, 6))
+        else:
+            ttk.Button(row, text="Réglages de sauvegarde", style="Accent.TButton",
+                       command=lambda: (close(False), self.backup_dialog())).pack(side="left")
+        ttk.Button(row, text="Plus tard", style="Ghost.TButton", command=lambda: close(False)).pack(side="right")
+        ttk.Button(row, text="Non merci", style="Ghost.TButton", command=close).pack(side="right", padx=4)
+
     def update_dialog(self):
         d = self._dialog("Mises à jour")
         f = ttk.Frame(d, style="Panel.TFrame", padding=20)
@@ -1685,6 +1729,36 @@ class App(tk.Tk):
             folder = self.settings.get("backup_dir")
             if folder and os.path.isdir(folder):
                 os.startfile(folder)
+
+        clouds = backup.cloud_folders()
+        cloud_box = ttk.Frame(f, style="Panel.TFrame")
+        cloud_box.pack(fill="x", pady=(0, 12))
+        ttk.Label(cloud_box, text="Clouds trouvés sur ce PC :" if clouds else
+                  "Aucun cloud trouvé. OneDrive est inclus dans Windows : connecte-toi avec un compte Microsoft "
+                  "(Paramètres → Comptes → Sauvegarde Windows / OneDrive), ou installe Google Drive pour ordinateur "
+                  "ou Dropbox, puis rouvre cette fenêtre.", style="Muted.TLabel", wraplength=480,
+                  justify="left").pack(anchor="w", pady=(0, 4))
+
+        def use(cloud):
+            self.settings["backup_dir"] = cloud["path"]
+            self.settings["backup_asked"] = True
+            backup.save_settings(self.settings)
+            self._auto_backup()
+            refresh()
+            render_clouds()
+
+        def render_clouds():
+            for w in cloud_row.winfo_children():
+                w.destroy()
+            current = os.path.normcase(self.settings.get("backup_dir") or "")
+            for cloud in clouds:
+                chosen = os.path.normcase(cloud["path"]) == current
+                ttk.Button(cloud_row, text=("✓ " if chosen else "") + cloud["name"],
+                           style="Accent.TButton" if chosen else "TButton",
+                           command=lambda c=cloud: use(c)).pack(side="left", padx=(0, 6))
+        cloud_row = ttk.Frame(cloud_box, style="Panel.TFrame")
+        cloud_row.pack(anchor="w")
+        render_clouds()
 
         btns = ttk.Frame(f, style="Panel.TFrame")
         btns.pack(fill="x")

@@ -33,24 +33,70 @@ Ce dossier contient ton coffre CHIFFRÉ. Sans ton mot de passe maître ou ta cl�
 secours, il est illisible : il ne craint rien dans le cloud.
 
 Sur le nouveau PC :
-1. Installe Python 3 (python.org, coche « Add python.exe to PATH »).
-2. Dans un terminal :  python -m pip install --user cryptography argon2-cffi
-3. Dézippe CoffreFort-programme.zip où tu veux.
-4. Lance « Lancer CoffreFort.bat » puis, sur l'écran de création,
-   clique « Restaurer une sauvegarde… » et choisis coffre.vault
+1. Reconnecte ton cloud (OneDrive, Google Drive, MEGA…) pour retrouver ce dossier.
+2. Dézippe CoffreFort-programme.zip où tu veux et double-clique sur « Installer CoffreFort.bat »
+   (il installe Python si besoin). Sans ce fichier : python.org, puis
+   python -m pip install --user cryptography argon2-cffi, puis lance app.pyw.
+3. Sur l'écran de création, clique « Restaurer une sauvegarde… » et choisis coffre.vault
    (ou une version datée dans le dossier versions si la dernière pose problème).
-5. Ouvre avec ton mot de passe maître (ou « Mot de passe oublié ? » + clé de secours).
-6. Pour l'extension navigateur : relance « Installer extension.bat », recharge l'extension
-   et ré-associe-la.
+4. Ouvre avec ton mot de passe maître (ou « Mot de passe oublié ? » + clé de secours).
+5. Pour l'extension navigateur : recharge-la depuis le dossier indiqué et ré-associe-la.
 """
 
 
-def suggest_folder() -> str:
+FOLDER_NAME = "CoffreFort-Sauvegarde"
+
+
+def _dropbox_root():
+    for base in (os.environ.get("APPDATA", ""), os.environ.get("LOCALAPPDATA", "")):
+        try:
+            with open(os.path.join(base, "Dropbox", "info.json"), encoding="utf-8") as f:
+                info = json.load(f)
+            for kind in ("personal", "business"):
+                path = info.get(kind, {}).get("path")
+                if path and os.path.isdir(path):
+                    return path
+        except (OSError, ValueError, AttributeError):
+            pass
+    path = os.path.join(os.path.expanduser("~"), "Dropbox")
+    return path if os.path.isdir(path) else None
+
+
+def _google_drive_root():
+    # Google Drive pour ordinateur monte un lecteur (souvent G:) contenant « Mon Drive ».
+    for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
+        for name in ("Mon Drive", "My Drive"):
+            path = f"{letter}:\\{name}"
+            try:
+                if os.path.isdir(path):
+                    return path
+            except OSError:
+                pass
+    path = os.path.join(os.path.expanduser("~"), "Google Drive")
+    return path if os.path.isdir(path) else None
+
+
+def cloud_folders() -> list[dict]:
+    """Dossiers synchronisés trouvés sur ce PC : [{"name": "OneDrive", "path": ".../CoffreFort-Sauvegarde"}, …]."""
     home = os.path.expanduser("~")
+    found = []
+
+    def add(name, root):
+        if root and os.path.isdir(root) and not any(os.path.normcase(c["root"]) == os.path.normcase(root) for c in found):
+            found.append({"name": name, "root": root, "path": os.path.join(root, FOLDER_NAME)})
     for root in (os.path.join(home, "Documents", "MEGA"), os.path.join(home, "MEGA"), os.path.join(home, "MEGAsync")):
-        if os.path.isdir(root):
-            return os.path.join(root, "CoffreFort-Sauvegarde")
-    return ""
+        add("MEGA", root)
+    add("OneDrive", os.environ.get("OneDriveConsumer") or os.environ.get("OneDrive"))
+    add("OneDrive (pro)", os.environ.get("OneDriveCommercial"))
+    add("Google Drive", _google_drive_root())
+    add("Dropbox", _dropbox_root())
+    add("iCloud Drive", os.path.join(home, "iCloudDrive"))
+    return found
+
+
+def suggest_folder() -> str:
+    clouds = cloud_folders()
+    return clouds[0]["path"] if clouds else ""
 
 
 def load_settings() -> dict:
@@ -58,7 +104,7 @@ def load_settings() -> dict:
         with open(SETTINGS_PATH, encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, ValueError):
-        return {"backup_dir": suggest_folder(), "last_backup": 0}
+        return {"backup_dir": "", "last_backup": 0}  # le choix du cloud est proposé dans l'appli
 
 
 def save_settings(settings: dict):

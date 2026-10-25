@@ -134,3 +134,10 @@ Si le coffre est verrouillé, CoffreFort s'ouvre ; une fois déverrouillé, la f
 - **Favori** : clique sur l'étoile ☆ dans la liste ou en haut de la fiche. Les favoris sont toujours en tête de liste.
 - **Catégorie d'un compte** : clique sur la pastille sous son nom dans la fiche, ou choisis-la dans « Modifier ».
   Un compte ajouté pendant qu'une catégorie est affichée y est rangé automatiquement.
+
+## Sauvegarde cloud sans MEGA (OneDrive, Google Drive, Dropbox, iCloud)
+
+CoffreFort détecte les clouds installés sur le PC. Tant qu'aucun dossier de sauvegarde n'est choisi, un bandeau propose
+« Sauvegarder dans OneDrive » (ou Google Drive, Dropbox, MEGA…) en un clic. On peut changer à tout moment dans
+⚙ Réglages → Sauvegarde automatique. Sans cloud : OneDrive est inclus dans Windows (se connecter avec un compte Microsoft).
+Le coffre est copié tel quel, chiffré : le cloud ne voit jamais les mots de passe.
