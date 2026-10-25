@@ -11,7 +11,7 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
   if (res.ok && res.entries.length === 1) {
     const f = await request("fill", { url: tab.url, id: res.entries[0].id });
     if (f.ok) {
-      await fillTab(tab.id, f.host, f.username, f.password, "login");
+      await fillTab(tab.id, f.host, f.username, f.email, f.password, "login");
       return;
     }
   }

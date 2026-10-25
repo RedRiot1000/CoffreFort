@@ -237,10 +237,10 @@ class Vault:
         return recovery
 
     # ---------- entrées ----------
-    def add(self, site: str, username: str, password: str, url: str = "", notes: str = "") -> dict:
+    def add(self, site: str, username: str, password: str, url: str = "", notes: str = "", email: str = "") -> dict:
         now = time.time()
         entry = {
-            "id": uuid.uuid4().hex, "site": site, "username": username, "password": password,
+            "id": uuid.uuid4().hex, "site": site, "username": username, "email": email, "password": password,
             "url": url, "notes": notes, "created": now, "modified": now,
         }
         self.entries.append(entry)
@@ -265,7 +265,8 @@ class Vault:
         items = sorted(self.entries, key=lambda e: e["site"].lower())
         if not q:
             return items
-        return [e for e in items if q in e["site"].lower() or q in e["username"].lower() or q in e["url"].lower()]
+        return [e for e in items if q in e["site"].lower() or q in e["username"].lower()
+                or q in e.get("email", "").lower() or q in e["url"].lower()]
 
 
 # ---------- générateur ----------

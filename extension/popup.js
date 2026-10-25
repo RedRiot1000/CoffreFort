@@ -98,7 +98,7 @@ async function showEntries() {
   const items = res.entries.map((e) => `
     <button class="entry" data-id="${esc(e.id)}">
       <span class="site">${esc(e.site)}</span>
-      <span class="user">${esc(e.username || "(sans identifiant)")}</span>
+      <span class="user">${esc(e.username || e.email || "(sans identifiant)")}</span>
     </button>`).join("");
 
   render(`
@@ -107,7 +107,8 @@ async function showEntries() {
     <div class="list">${items || `<p class="muted">Aucun identifiant enregistré pour ce site.</p>`}</div>
     <details ${res.entries.length ? "" : "open"}>
       <summary>＋ Nouveau compte sur ce site</summary>
-      <input id="newUser" placeholder="Identifiant ou e-mail" autocomplete="off">
+      <input id="newUser" placeholder="Identifiant / pseudo" autocomplete="off">
+      <input id="newEmail" placeholder="E-mail (si le site le demande aussi)" autocomplete="off">
       <div class="row">
         <label>Longueur <select id="newLen"><option>20</option><option selected>24</option><option>32</option></select></label>
         <button id="create" class="accent">Générer et remplir</button>
@@ -121,17 +122,18 @@ async function showEntries() {
     btn.onclick = async () => {
       const f = await request("fill", { url: tab.url, id: btn.dataset.id });
       if (!f.ok) return (status.textContent = "Refusé : " + f.error);
-      const result = await fillTab(tab.id, f.host, f.username, f.password, "login");
+      const result = await fillTab(tab.id, f.host, f.username, f.email, f.password, "login");
       if (result === "ok") return window.close();
       status.textContent = FILL_RESULT[result] || result;
     };
   });
   document.getElementById("create").onclick = async () => {
     const username = document.getElementById("newUser").value.trim();
+    const email = document.getElementById("newEmail").value.trim();
     const length = Number(document.getElementById("newLen").value);
-    const f = await request("create", { url: tab.url, username, length });
+    const f = await request("create", { url: tab.url, username, email, length });
     if (!f.ok) return (status.textContent = "Erreur : " + f.error);
-    const result = await fillTab(tab.id, f.host, f.username, f.password, "new");
+    const result = await fillTab(tab.id, f.host, f.username, f.email, f.password, "new");
     status.textContent = "✔ Enregistré dans CoffreFort. " + (result === "ok" ? "" : FILL_RESULT[result] || "");
     if (result === "ok") setTimeout(() => window.close(), 1200);
   };

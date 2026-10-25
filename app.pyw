@@ -609,7 +609,7 @@ class App(tk.Tk):
     def refresh_list(self, select_id=None):
         self.tree.delete(*self.tree.get_children())
         for e in self.vault.search(self.search_var.get()):
-            self.tree.insert("", "end", iid=e["id"], values=(e["site"], e["username"]))
+            self.tree.insert("", "end", iid=e["id"], values=(e["site"], e["username"] or e.get("email", "")))
         if select_id and self.tree.exists(select_id):
             self.tree.selection_set(select_id)
             self.tree.see(select_id)
@@ -660,6 +660,8 @@ class App(tk.Tk):
                 eye.pack(side="right", padx=4)
 
         field("Identifiant", e["username"] or "—", "username" if e["username"] else None)
+        if e.get("email"):
+            field("E-mail", e["email"], "email")
         field("Mot de passe", e["password"], "password", secret=True)
         bits = estimate_entropy(e["password"])
         text, _ = strength_label(bits)
@@ -703,7 +705,7 @@ class App(tk.Tk):
     def copy_field(self, key):
         e = self._selected()
         if e:
-            self.copy_text(e[key], "Mot de passe" if key == "password" else "Identifiant")
+            self.copy_text(e.get(key, ""), {"password": "Mot de passe", "email": "E-mail"}.get(key, "Identifiant"))
 
     def _clear_clipboard(self):
         self._clip_job = None
@@ -741,7 +743,7 @@ class App(tk.Tk):
         d = self._dialog("Modifier l'entrée" if entry else "Nouvelle entrée")
         f = ttk.Frame(d, style="Panel.TFrame", padding=18)
         f.pack(fill="both", expand=True)
-        vars_ = {k: tk.StringVar(value=(entry or {}).get(k, "")) for k in ("site", "username", "password", "url")}
+        vars_ = {k: tk.StringVar(value=(entry or {}).get(k, "")) for k in ("site", "username", "email", "password", "url")}
 
         def label(text):
             ttk.Label(f, text=text, style="Muted.TLabel").pack(anchor="w", pady=(6, 2))
@@ -750,8 +752,10 @@ class App(tk.Tk):
         site_e = ttk.Entry(f, textvariable=vars_["site"], width=48)
         site_e.pack(fill="x")
         site_e.focus_set()
-        label("Identifiant / e-mail")
+        label("Identifiant / pseudo")
         ttk.Entry(f, textvariable=vars_["username"]).pack(fill="x")
+        label("E-mail (si le site demande aussi un e-mail)")
+        ttk.Entry(f, textvariable=vars_["email"]).pack(fill="x")
         label("Mot de passe *")
         row = ttk.Frame(f, style="Panel.TFrame")
         row.pack(fill="x")
@@ -1036,26 +1040,29 @@ class App(tk.Tk):
         matches = [e for e in self.vault.entries if bridge.entry_matches(e, host)]
         if kind == "list":
             return {"ok": True, "host": host,
-                    "entries": [{"id": e["id"], "site": e["site"], "username": e["username"]} for e in matches]}
+                    "entries": [{"id": e["id"], "site": e["site"], "username": e["username"],
+                                 "email": e.get("email", "")} for e in matches]}
         if kind == "fill":
             e = next((e for e in matches if e["id"] == req.get("id")), None)
             if e is None:
                 return {"error": "no_match"}
             self.set_status(f"Identifiants « {e['site']} » envoyés au navigateur ({host}).")
-            return {"ok": True, "host": host, "username": e["username"], "password": e["password"]}
+            return {"ok": True, "host": host, "username": e["username"], "email": e.get("email", ""),
+                    "password": e["password"]}
         if kind == "create":
             username = str(req.get("username", ""))[:200]
+            email = str(req.get("email", ""))[:200]
             try:
                 length = min(max(int(req.get("length", 24)), 12), 64)
             except (TypeError, ValueError):
                 length = 24
             password = generate_password(length)
-            entry = self.vault.add(site=host, username=username, password=password, url="https://" + host)
+            entry = self.vault.add(site=host, username=username, email=email, password=password, url="https://" + host)
             if hasattr(self, "tree") and self.tree.winfo_exists():
                 self.refresh_list(select_id=entry["id"])
                 self.show_details()
             self.set_status(f"Nouveau compte enregistré depuis le navigateur : {host}")
-            return {"ok": True, "host": host, "username": username, "password": password}
+            return {"ok": True, "host": host, "username": username, "email": email, "password": password}
         return {"error": "unknown"}
 
     def _pair_request(self, req, respond):
