@@ -19,7 +19,9 @@ VK_L = 0x4C
 WM_HOTKEY, WM_QUIT = 0x0312, 0x0012
 INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP, KEYEVENTF_UNICODE = 0x0002, 0x0004
-VK_TAB = 0x09
+VK_TAB, VK_CONTROL, VK_A = 0x09, 0x11, 0x41
+SW_RESTORE = 9
+TAB, SELECT_ALL = "\t", "\x01"  # étapes spéciales de type_into
 MODIFIER_KEYS = (0x10, 0x11, 0x12, 0x5B, 0x5C)  # Maj, Ctrl, Alt, Windows gauche/droite
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
@@ -56,6 +58,12 @@ user32.IsWindow.argtypes = [wintypes.HWND]
 user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
 user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
 user32.GetAsyncKeyState.restype = ctypes.c_short
+EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+user32.EnumWindows.argtypes = [EnumWindowsProc, wintypes.LPARAM]
+user32.IsWindowVisible.argtypes = [wintypes.HWND]
+user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+user32.IsIconic.argtypes = [wintypes.HWND]
+user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
 kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
 kernel32.OpenProcess.restype = wintypes.HANDLE
 kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
@@ -144,9 +152,26 @@ def wait_modifiers_released(timeout=3.0):
     return False
 
 
+def find_windows(match):
+    """Fenêtres visibles (de la plus en avant à la plus en arrière) dont window_info vérifie match(info)."""
+    found = []
+
+    @EnumWindowsProc
+    def callback(hwnd, _):
+        if user32.IsWindowVisible(hwnd) and user32.GetWindowTextLengthW(hwnd) > 0:
+            info = window_info(hwnd)
+            if match(info):
+                found.append(info)
+        return True
+    user32.EnumWindows(callback, 0)
+    return found
+
+
 def focus(hwnd, timeout=1.0):
     if user32.GetForegroundWindow() == hwnd:
         return True
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, SW_RESTORE)
     user32.SetForegroundWindow(hwnd)
     end = time.time() + timeout
     while time.time() < end:
@@ -157,8 +182,15 @@ def focus(hwnd, timeout=1.0):
     return False
 
 
-def type_into(hwnd, steps, delay=0.008):
-    """Tape `steps` (texte, ou "\\t" pour Tab) dans la fenêtre hwnd.
+SPECIAL_KEYS = {
+    TAB: [_key(vk=VK_TAB), _key(vk=VK_TAB, flags=KEYEVENTF_KEYUP)],
+    SELECT_ALL: [_key(vk=VK_CONTROL), _key(vk=VK_A), _key(vk=VK_A, flags=KEYEVENTF_KEYUP),
+                 _key(vk=VK_CONTROL, flags=KEYEVENTF_KEYUP)],
+}
+
+
+def type_into(hwnd, steps, delay=0.012, settle=0.25):
+    """Tape `steps` (texte, TAB ou SELECT_ALL) dans la fenêtre hwnd.
     Renvoie "ok", "no_window", "modifiers", "focus_lost" ou "blocked"."""
     if not user32.IsWindow(hwnd):
         return "no_window"
@@ -166,23 +198,23 @@ def type_into(hwnd, steps, delay=0.008):
         return "modifiers"
     if not focus(hwnd):
         return "focus_lost"
+    # Juste après Ctrl+Alt relâchés ou un changement de fenêtre, certaines applis (Steam…)
+    # avalent la première touche : on leur laisse le temps de se remettre.
+    time.sleep(settle)
     for step in steps:
-        if step == "\t":
-            units = None
+        if step in SPECIAL_KEYS:
+            batches = [SPECIAL_KEYS[step]]
         else:
             data = step.encode("utf-16-le")
             units = [int.from_bytes(data[i:i + 2], "little") for i in range(0, len(data), 2)]
-        for unit in (units if units is not None else [None]):
+            batches = [[_key(scan=u, flags=KEYEVENTF_UNICODE), _key(scan=u, flags=KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)]
+                       for u in units]
+        for batch in batches:
             if user32.GetForegroundWindow() != hwnd:
                 return "focus_lost"  # l'utilisateur a changé de fenêtre : on n'écrit pas ailleurs
-            if unit is None:
-                ok = _send([_key(vk=VK_TAB), _key(vk=VK_TAB, flags=KEYEVENTF_KEYUP)])
-            else:
-                ok = _send([_key(scan=unit, flags=KEYEVENTF_UNICODE),
-                            _key(scan=unit, flags=KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)])
-            if not ok:
+            if not _send(batch):
                 return "blocked"  # appli lancée en administrateur : Windows bloque la frappe
             time.sleep(delay)
-        if step == "\t":
-            time.sleep(0.12)  # laisser le champ suivant prendre le focus
+        if step in SPECIAL_KEYS:
+            time.sleep(0.12)  # laisser le champ suivant prendre le focus / la sélection se faire
     return "ok"

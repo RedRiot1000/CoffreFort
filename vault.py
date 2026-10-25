@@ -141,6 +141,43 @@ class Vault:
         self._slots = {}
         self.entries = []
         self.paired = []
+        self.forget_suspended()
+
+    # ---------- verrouillage rapide (Windows Hello) ----------
+    @property
+    def suspended(self) -> bool:
+        return getattr(self, "_suspended", None) is not None
+
+    def suspend(self):
+        """Verrouille, mais garde la clé de données chiffrée par Windows pour CE processus seulement
+        (CryptProtectMemory) : resume() la retrouve sans mot de passe, après Windows Hello."""
+        import winsec
+        if self._data_key is None:
+            raise VaultError("Coffre verrouillé.")
+        kept = bytearray(self._data_key)
+        winsec.protect_memory(kept)
+        self.lock()
+        self._suspended = kept
+
+    def resume(self):
+        import winsec
+        if not self.suspended:
+            raise VaultError("Aucun verrouillage rapide en cours.")
+        key = bytearray(self._suspended)
+        winsec.unprotect_memory(key)
+        try:
+            self._open(self._read(), bytes(key))
+        finally:
+            for i in range(len(key)):
+                key[i] = 0
+        self.forget_suspended()
+
+    def forget_suspended(self):
+        kept = getattr(self, "_suspended", None)
+        if kept is not None:
+            for i in range(len(kept)):
+                kept[i] = 0
+        self._suspended = None
 
     # ---------- création / ouverture ----------
     def create(self, password: str) -> str:

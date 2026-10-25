@@ -4,6 +4,7 @@ import ctypes
 import json
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -19,13 +20,15 @@ import backup  # noqa: E402
 import autotype  # noqa: E402
 import bridge  # noqa: E402
 import updater  # noqa: E402
+import winsec  # noqa: E402
 from vault import Vault, VaultError, WrongPassword, estimate_entropy, generate_password, strength_label  # noqa: E402
 
 VAULT_PATH = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "CoffreFort", "coffre.vault")
 AUTO_LOCK_SECONDS = 5 * 60
+HELLO_MAX_HOURS = 12
 CLIPBOARD_CLEAR_SECONDS = 20
 MIN_MASTER_LENGTH = 12
-PROGRAM_FILES = ("app.pyw", "vault.py", "bridge.py", "backup.py", "updater.py", "autotype.py")
+PROGRAM_FILES = ("app.pyw", "vault.py", "bridge.py", "backup.py", "updater.py", "autotype.py", "winsec.py")
 UPDATE_CHECK_MS = 3000
 UPDATE_SETTLE_SECONDS = 5
 ONLINE_CHECK_MS = 6 * 3600 * 1000
@@ -292,6 +295,12 @@ class App(tk.Tk):
             self.bind_all(seq, self._touch, add="+")
         self.protocol("WM_DELETE_WINDOW", self._quit)
         self.after(5000, self._auto_lock_tick)
+        self._master_at = 0.0  # dernier déverrouillage par mot de passe maître (ou clé de secours)
+        self._via_hello = False
+        self._hello_state = None
+        self._check_hello()
+        self._last_session_tick = time.time()
+        self.after(2000, self._session_tick)
 
         self.body = ttk.Frame(self, style="TFrame")
         self.body.pack(fill="both", expand=True)
@@ -382,6 +391,10 @@ class App(tk.Tk):
         msg.pack(pady=4)
         btn = ttk.Button(box, text="Créer le coffre" if creating else "Déverrouiller", style="Accent.TButton")
         btn.pack(pady=6, ipadx=20)
+        if not creating and self.vault.suspended:
+            hello_btn = ttk.Button(box, text="🖐  Déverrouiller avec Windows Hello")
+            hello_btn.config(command=lambda: self._hello_unlock(hello_btn, msg))
+            hello_btn.pack(pady=(2, 6), ipadx=10)
 
         def submit(_=None):
             if str(btn["state"]) == "disabled":
@@ -572,6 +585,9 @@ class App(tk.Tk):
 
     # ---------- écran principal ----------
     def show_main(self):
+        if not self._via_hello:
+            self._master_at = time.time()
+        self._via_hello = False
         self._clear_body()
         self.current = None
 
@@ -592,6 +608,7 @@ class App(tk.Tk):
         menu.add_command(label="Clé de secours…", command=self.regenerate_recovery)
         menu.add_command(label="Extensions navigateur…", command=self.manage_extensions)
         menu.add_command(label="Sauvegarde automatique…", command=self.backup_dialog)
+        menu.add_command(label="Verrouillage et Windows Hello…", command=self.lock_dialog)
         if updater.enabled():
             menu.add_command(label="Mises à jour…", command=self.update_dialog)
         settings["menu"] = menu
@@ -612,6 +629,9 @@ class App(tk.Tk):
         self.tree.column("user", width=240)
         self.tree.grid(row=0, column=0, sticky="nsew")
         self.tree.bind("<<TreeviewSelect>>", lambda _: self.show_details())
+        # Choix fait par l'utilisateur (clic ou flèches), pas une sélection automatique.
+        self.tree.bind("<ButtonRelease-1>", self._arm, add="+")
+        self.tree.bind("<KeyRelease>", self._arm, add="+")
         self.tree.bind("<Double-1>", lambda _: self.copy_field("password"))
 
         self.details = ttk.Frame(main, style="Panel.TFrame", padding=18)
@@ -648,6 +668,9 @@ class App(tk.Tk):
             return None
         return next((e for e in self.vault.entries if e["id"] == sel[0]), None)
 
+    def _arm(self, _=None):
+        self._selected_at = time.time()
+
     def show_details(self):
         for w in self.details.winfo_children():
             w.destroy()
@@ -683,7 +706,13 @@ class App(tk.Tk):
         if e.get("email"):
             field("E-mail", e["email"], "email")
         if e.get("apps"):
-            field(f"Applis Windows ({autotype.HOTKEY_LABEL})", ", ".join(e["apps"]))
+            ttk.Label(self.details, text=f"Applis Windows ({autotype.HOTKEY_LABEL})", style="Muted.TLabel").pack(anchor="w")
+            for app_exe in e["apps"]:
+                row = ttk.Frame(self.details, style="Panel.TFrame")
+                row.pack(fill="x", pady=(0, 2))
+                ttk.Label(row, text=app_exe, style="Value.TLabel").pack(side="left")
+                ttk.Button(row, text="Retirer", command=lambda x=app_exe: self._set_app(e, x, False)).pack(side="right")
+            ttk.Frame(self.details, style="Panel.TFrame", height=8).pack()
         field("Mot de passe", e["password"], "password", secret=True)
         bits = estimate_entropy(e["password"])
         text, _ = strength_label(bits)
@@ -709,6 +738,7 @@ class App(tk.Tk):
         btns = ttk.Frame(self.details, style="Panel.TFrame")
         btns.pack(side="bottom", fill="x")
         ttk.Button(btns, text="Modifier", command=self.edit_entry).pack(side="left")
+        ttk.Button(btns, text="⌨ Remplir l'appli", command=lambda: self.fill_open_app(e)).pack(side="left", padx=6)
         ttk.Button(btns, text="Supprimer", style="Danger.TButton", command=self.delete_entry).pack(side="right")
         modified = time.strftime("%d/%m/%Y %H:%M", time.localtime(e["modified"]))
         ttk.Label(self.details, text=f"Modifié le {modified}", style="Muted.TLabel").pack(side="bottom", anchor="w",
@@ -875,7 +905,101 @@ class App(tk.Tk):
                 messagebox.showinfo("OK", "Mot de passe maître changé.")
         ttk.Button(f, text="Changer", style="Accent.TButton", command=go).pack(anchor="e", pady=(10, 0))
 
+    # ---------- verrouillage : Windows (Win+L, veille) et Windows Hello ----------
+    def _session_tick(self):
+        now = time.time()
+        slept = now - self._last_session_tick > 30  # le minuteur a « sauté » : le PC était en veille
+        self._last_session_tick = now
+        if self.vault.unlocked and self.settings.get("lock_on_session", True):
+            try:
+                locked = winsec.session_locked()
+            except OSError:
+                locked = False
+            if slept or locked:
+                self.lock()
+        self.after(2000, self._session_tick)
+
+    def _check_hello(self):
+        threading.Thread(target=lambda: setattr(self, "_hello_state", winsec.hello_availability()),
+                         daemon=True).start()
+
+    def _hello_allowed(self):
+        return (self.settings.get("hello", False) and self._hello_state == "Available"
+                and time.time() - self._master_at < HELLO_MAX_HOURS * 3600)
+
+    def _hello_unlock(self, btn, msg):
+        btn.config(state="disabled")
+        msg.config(text="Identifie-toi dans la fenêtre Windows Hello…", style="Sub.TLabel")
+        result = {}
+        worker = threading.Thread(target=lambda: result.update(r=winsec.hello_verify("Déverrouiller CoffreFort")),
+                                  daemon=True)
+        worker.start()
+
+        def poll():
+            if worker.is_alive():
+                self.after(150, poll)
+                return
+            r = result.get("r")
+            if r == "Verified" and self.vault.suspended:
+                try:
+                    self.vault.resume()
+                except (VaultError, OSError) as ex:
+                    self.vault.forget_suspended()
+                    self.show_login()
+                    messagebox.showerror("Windows Hello", f"{ex}\nEntre ton mot de passe maître.")
+                    return
+                self._via_hello = True
+                self.show_main()
+                return
+            if not btn.winfo_exists():
+                return
+            btn.config(state="normal")
+            msg.config(style="Error.TLabel", text={
+                "Canceled": "", "DeviceNotPresent": "Lecteur Windows Hello introuvable.",
+                "NotConfiguredForUser": "Windows Hello n'est pas configuré sur ce PC.",
+                "DisabledByPolicy": "Windows Hello est désactivé sur ce PC.",
+                "RetriesExhausted": "Trop d'essais : entre ton mot de passe maître.",
+            }.get(r, "Windows Hello n'a pas abouti : entre ton mot de passe maître."))
+        poll()
+
+    def lock_dialog(self):
+        d = self._dialog("Verrouillage")
+        f = ttk.Frame(d, style="Panel.TFrame", padding=20)
+        f.pack(fill="both", expand=True)
+        ttk.Label(f, text="🔒  Verrouillage", style="Panel.TLabel", font=("Segoe UI Semibold", 15)).pack(anchor="w")
+        on_session = tk.BooleanVar(value=self.settings.get("lock_on_session", True))
+        hello = tk.BooleanVar(value=self.settings.get("hello", False))
+        ttk.Checkbutton(f, text="Verrouiller CoffreFort quand je verrouille Windows (Win+L) ou que le PC se met en veille",
+                        variable=on_session).pack(anchor="w", pady=(12, 0))
+        ttk.Label(f, text=f"CoffreFort se verrouille aussi après {AUTO_LOCK_SECONDS // 60} minutes sans activité.",
+                  style="Muted.TLabel").pack(anchor="w", padx=(22, 0))
+        available = self._hello_state == "Available"
+        cb = ttk.Checkbutton(f, text="Déverrouiller avec Windows Hello (code PIN, empreinte, visage)", variable=hello)
+        cb.pack(anchor="w", pady=(14, 0))
+        if not available:
+            cb.state(["disabled"])
+            hello.set(False)
+        ttk.Label(f, text=("Le mot de passe maître reste demandé à chaque démarrage de CoffreFort et au moins toutes les "
+                           f"{HELLO_MAX_HOURS} heures. Entre-temps, la clé du coffre reste en mémoire, chiffrée par "
+                           "Windows pour CoffreFort seul." if available else
+                           "Windows Hello n'est pas configuré sur ce PC (Paramètres → Comptes → Options de connexion)."),
+                  style="Muted.TLabel", wraplength=470, justify="left").pack(anchor="w", padx=(22, 0))
+
+        def save():
+            self.settings["lock_on_session"] = on_session.get()
+            self.settings["hello"] = hello.get()
+            backup.save_settings(self.settings)
+            d.destroy()
+            self.set_status("Réglages de verrouillage enregistrés.")
+        btns = ttk.Frame(f, style="Panel.TFrame")
+        btns.pack(fill="x", pady=(16, 0))
+        ttk.Button(btns, text="Annuler", command=d.destroy).pack(side="right")
+        ttk.Button(btns, text="Enregistrer", style="Accent.TButton", command=save).pack(side="right", padx=6)
+
     # ---------- saisie automatique dans les applis Windows ----------
+    BROWSERS = ("chrome.exe", "brave.exe", "opera.exe", "msedge.exe", "firefox.exe", "vivaldi.exe")
+    SELECTION_TTL = 120  # s : un compte choisi dans CoffreFort reste « armé » pour Ctrl+Alt+L
+
     def _autotype_tick(self):
         try:
             while True:
@@ -887,25 +1011,85 @@ class App(tk.Tk):
     def _apps_of(self, e):
         return [a.lower() for a in e.get("apps", [])]
 
+    def _armed_entry(self):
+        """Compte sélectionné récemment dans la liste de CoffreFort, s'il y en a un."""
+        e = self._selected() if hasattr(self, "tree") and self.tree.winfo_exists() else None
+        if e and time.time() - getattr(self, "_selected_at", 0) < self.SELECTION_TTL:
+            return e
+        return None
+
+    def _guesses(self, target):
+        """Comptes non associés qui ressemblent à l'appli (nom du programme ou titre de la fenêtre)."""
+        stem = os.path.splitext(target["exe"])[0].replace("webhelper", "").replace("launcher", "").strip()
+        words = {w for w in re.split(r"[^a-z0-9]+", f"{stem} {target['title'].lower()}") if len(w) >= 3}
+        out = []
+        for e in self.vault.entries:
+            hay = f"{e['site']} {e['url']}".lower()
+            if any(w in hay for w in words):
+                out.append(e)
+        return out
+
     def _autotype_request(self, target):
-        if target["pid"] == os.getpid() or not target["exe"]:
-            return  # pas dans CoffreFort lui-même
         if not self.vault.unlocked:
             self._pending_target = (target, time.time())
             self._bring_to_front()
             return
         self.last_activity = time.time()
+        if target["pid"] == os.getpid():
+            # Ctrl+Alt+L dans CoffreFort : remplir l'appli ouverte qui correspond au compte sélectionné.
+            return self.fill_open_app()
+        if not target["exe"]:
+            return
         matches = [e for e in self.vault.entries if target["exe"] in self._apps_of(e)]
+        armed = self._armed_entry()
+        if armed:
+            self._selected_at = 0  # une seule fois
+            # Compte choisi juste avant dans CoffreFort (plusieurs comptes Steam…) : direct s'il va avec
+            # cette appli ; sinon on demande, ce compte en tête, pour ne rien taper au mauvais endroit.
+            if armed in matches or (not matches and armed in self._guesses(target)):
+                return self._autotype(target, armed, remember=not matches)
+            return self._autotype_picker(target, matches, preferred=armed)
         if len(matches) == 1:
-            self._autotype(target, matches[0])
-        else:
-            self._autotype_picker(target, matches)
+            return self._autotype(target, matches[0])
+        self._autotype_picker(target, matches)
 
-    def _autotype(self, target, entry, password_only=False):
-        steps = [entry["password"]]
+    def _window_for(self, entry):
+        """Fenêtre ouverte (la plus en avant) qui correspond au compte."""
+        apps = self._apps_of(entry)
+        site = entry["site"].lower().strip()
+
+        def match(w):
+            if w["pid"] == os.getpid():
+                return False
+            if w["exe"] in apps:
+                return True
+            # Pas encore associé : titre de fenêtre contenant le nom du site (hors navigateurs : extension).
+            return not apps and len(site) >= 3 and site in w["title"].lower() and w["exe"] not in self.BROWSERS
+        wins = autotype.find_windows(match)
+        return wins[0] if wins else None
+
+    def fill_open_app(self, entry=None):
+        entry = entry or self._selected()
+        if not entry:
+            self.set_status(f"Sélectionne d'abord un compte, puis {autotype.HOTKEY_LABEL}.")
+            return
+        target = self._window_for(entry)
+        if not target:
+            messagebox.showinfo(
+                "Remplir une appli",
+                f"Aucune fenêtre ouverte ne correspond à « {entry['site']} ».\n\n"
+                f"Ouvre la page de connexion de l'appli, clique dans le champ identifiant, puis appuie sur "
+                f"{autotype.HOTKEY_LABEL} dans l'appli : ce compte sera proposé en premier.")
+            self._selected_at = time.time()
+            return
+        self._autotype(target, entry, remember=not self._apps_of(entry))
+
+    def _autotype(self, target, entry, password_only=False, remember=False):
         login = entry["username"] or entry.get("email", "")
         if login and not password_only:
-            steps = [login, "\t", entry["password"]]
+            steps = [autotype.SELECT_ALL, login, autotype.TAB, autotype.SELECT_ALL, entry["password"]]
+        else:
+            steps = [autotype.SELECT_ALL, entry["password"]]
         result = autotype.type_into(target["hwnd"], steps)
         messages = {
             "ok": f"« {entry['site']} » rempli dans {target['exe']}.",
@@ -918,8 +1102,10 @@ class App(tk.Tk):
         if result != "ok":
             self._bring_to_front()
             messagebox.showwarning("Remplissage", messages.get(result, result))
+        elif remember and target["exe"] and target["exe"] not in self._apps_of(entry):
+            self.after(50, lambda: self._set_app(entry, target["exe"], True))  # après la frappe (~1 s)
 
-    def _autotype_picker(self, target, matches):
+    def _autotype_picker(self, target, matches, preferred=None):
         if getattr(self, "_picker", None) is not None and self._picker.winfo_exists():
             self._picker.destroy()
         d = tk.Toplevel(self)
@@ -932,47 +1118,86 @@ class App(tk.Tk):
         d.attributes("-topmost", True)
         f = ttk.Frame(d, style="Panel.TFrame", padding=16)
         f.pack(fill="both", expand=True)
-        name = target["title"] or target["exe"]
-        ttk.Label(f, text=f"Remplir dans « {name} »", style="Panel.TLabel",
-                  font=("Segoe UI Semibold", 13), wraplength=420).pack(anchor="w")
-        ttk.Label(f, text=f"Programme : {target['exe']}", style="Muted.TLabel").pack(anchor="w", pady=(0, 8))
+        exe = target["exe"]
+        ttk.Label(f, text=f"Remplir dans « {target['title'] or exe} »", style="Panel.TLabel",
+                  font=("Segoe UI Semibold", 13), wraplength=440).pack(anchor="w")
+        ttk.Label(f, text=f"Programme : {exe}", style="Muted.TLabel").pack(anchor="w", pady=(0, 8))
         query = tk.StringVar()
-        search = ttk.Entry(f, textvariable=query, width=50)
+        search = ttk.Entry(f, textvariable=query, width=54)
         search.pack(fill="x")
-        lst = tk.Listbox(f, height=9, bg=BG, fg=FG, selectbackground=ACCENT, relief="flat", activestyle="none",
-                         font=("Segoe UI", 10), highlightthickness=0)
-        lst.pack(fill="both", expand=True, pady=6)
+        show_all = tk.BooleanVar(value=False)
+        lst = tk.Listbox(f, height=7, bg=BG, fg=FG, selectbackground=ACCENT, relief="flat", activestyle="none",
+                         font=("Segoe UI", 10), highlightthickness=0, exportselection=False)
+        lst.pack(fill="both", expand=True, pady=(6, 2))
+        hint = ttk.Label(f, style="Muted.TLabel", wraplength=440, justify="left")
+        hint.pack(anchor="w")
+        notes = ttk.Label(f, style="Value.TLabel", wraplength=440, justify="left")
+        notes.pack(anchor="w", pady=(6, 4))
+        ttk.Checkbutton(f, text="Afficher tous mes comptes", variable=show_all,
+                        command=lambda: refresh()).pack(anchor="w")
         remember = tk.BooleanVar(value=not matches)
-        ttk.Checkbutton(f, text=f"Toujours utiliser ce compte pour {target['exe']}", variable=remember).pack(anchor="w")
+        ttk.Checkbutton(f, text=f"Associer ce compte à {exe} (proposé directement la prochaine fois)",
+                        variable=remember).pack(anchor="w")
         ttk.Label(f, text="Clique d'abord dans le champ identifiant de l'appli. Entrée = remplir.",
                   style="Muted.TLabel").pack(anchor="w", pady=(4, 8))
         shown = []
+        guesses = [] if matches else self._guesses(target)
 
         def refresh(*_):
-            ids = {e["id"] for e in matches}
-            items = matches + [e for e in self.vault.search(query.get()) if e["id"] not in ids]
-            if query.get().strip():
-                items = [e for e in items if e in self.vault.search(query.get())]
+            q = query.get().strip()
+            if q:
+                items = self.vault.search(q)  # la recherche porte sur tous les comptes
+                hint.config(text="Résultats de la recherche dans tous tes comptes.")
+            elif show_all.get():
+                items = self.vault.search("")
+                hint.config(text="Tous tes comptes.")
+            elif matches:
+                items = sorted(matches, key=lambda e: e["site"].lower())
+                hint.config(text=f"★ Comptes associés à {exe}. Tape pour chercher un autre compte.")
+            elif guesses:
+                items = guesses
+                hint.config(text="Comptes qui semblent correspondre. Tape pour chercher un autre compte.")
+            else:
+                items = self.vault.search("")
+                hint.config(text="Aucun compte associé à cette appli : choisis-le une fois, il sera retenu.")
+            if preferred and not q:
+                items = [preferred] + [e for e in items if e["id"] != preferred["id"]]
             shown[:] = items
             lst.delete(0, "end")
             for e in items:
                 login = e["username"] or e.get("email", "")
-                lst.insert("end", ("★ " if e["id"] in ids else "   ") + e["site"] + (f"  —  {login}" if login else ""))
+                star = "★ " if exe in self._apps_of(e) else "   "
+                lst.insert("end", star + e["site"] + (f"  —  {login}" if login else ""))
             if items:
                 lst.selection_set(0)
-        query.trace_add("write", refresh)
-        refresh()
+            on_select()
+
+        def current():
+            sel = lst.curselection()
+            return shown[sel[0]] if sel else None
+
+        def on_select(_=None):
+            e = current()
+            linked = bool(e) and exe in self._apps_of(e)
+            notes.config(text=("📝 " + e["notes"]) if e and e.get("notes") else "")
+            forget_btn.config(state="normal" if linked else "disabled")
+            remember.set(bool(e) and not linked and not matches)
 
         def go(password_only=False):
-            sel = lst.curselection()
-            if not sel:
+            e = current()
+            if not e:
                 return
-            entry = shown[sel[0]]
-            keep = remember.get() and target["exe"] not in self._apps_of(entry)
             d.destroy()
-            self._autotype(target, entry, password_only)
-            if keep:  # après la frappe : l'enregistrement prend ~1 s
-                self.after(50, lambda: self._remember_app(entry, target["exe"]))
+            self._autotype(target, e, password_only, remember=remember.get())
+
+        def forget():
+            e = current()
+            if e and messagebox.askyesno("Retirer l'association",
+                                         f"Ne plus proposer « {e['site']} » pour {exe} ?", parent=d):
+                self._set_app(e, exe, False)
+                if e in matches:
+                    matches.remove(e)
+                refresh()
 
         def move(delta):
             sel = lst.curselection()
@@ -980,9 +1205,11 @@ class App(tk.Tk):
             lst.selection_clear(0, "end")
             lst.selection_set(i)
             lst.see(i)
+            on_select()
             return "break"
         search.bind("<Down>", lambda _: move(1))
         search.bind("<Up>", lambda _: move(-1))
+        lst.bind("<<ListboxSelect>>", on_select)
         d.bind("<Return>", lambda _: go())
         d.bind("<Escape>", lambda _: d.destroy())
         lst.bind("<Double-1>", lambda _: go())
@@ -990,7 +1217,11 @@ class App(tk.Tk):
         btns.pack(fill="x")
         ttk.Button(btns, text="Remplir", style="Accent.TButton", command=go).pack(side="left")
         ttk.Button(btns, text="Mot de passe seul", command=lambda: go(True)).pack(side="left", padx=6)
+        forget_btn = ttk.Button(btns, text="Retirer de cette appli", command=forget)
+        forget_btn.pack(side="left")
         ttk.Button(btns, text="Annuler", command=d.destroy).pack(side="right")
+        query.trace_add("write", refresh)
+        refresh()
         d.update_idletasks()
         x, y = self.winfo_pointerxy()
         d.geometry(f"+{max(0, x - d.winfo_width() // 2)}+{max(0, y - 40)}")
@@ -998,13 +1229,14 @@ class App(tk.Tk):
         d.focus_force()
         search.focus_set()
 
-    def _remember_app(self, entry, exe):
-        apps = entry.get("apps", []) + [exe]
+    def _set_app(self, entry, exe, linked):
+        apps = [a for a in entry.get("apps", []) if a.lower() != exe.lower()] + ([exe] if linked else [])
         saved = self._busy(lambda: self.vault.update(entry["id"], apps=apps))
         if saved and hasattr(self, "tree") and self.tree.winfo_exists():
             self.refresh_list(select_id=entry["id"])
             self.show_details()
-            self.set_status(f"« {entry['site']} » sera rempli directement dans {exe} ({autotype.HOTKEY_LABEL}).")
+            self.set_status(f"« {entry['site']} » associé à {exe} ({autotype.HOTKEY_LABEL})." if linked
+                            else f"« {entry['site']} » n'est plus associé à {exe}.")
 
     # ---------- mises à jour ----------
     def _update_tick(self):
@@ -1363,7 +1595,10 @@ class App(tk.Tk):
             self.after_cancel(self._clip_job)
             self._clip_job = None
         self.clip.clear_if_ours()
-        self.vault.lock()
+        if self.vault.unlocked and self._hello_allowed():
+            self.vault.suspend()  # Windows Hello pourra rouvrir sans le mot de passe maître
+        else:
+            self.vault.lock()
         self.current = None
         self.show_login()
 

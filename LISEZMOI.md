@@ -106,7 +106,22 @@ Comme l'extension, mais pour les programmes installés :
 CoffreFort tape l'identifiant (ou l'e-mail), Tab, puis le mot de passe, sans valider : tu appuies toi-même sur Entrée.
 « Mot de passe seul » sert quand l'identifiant est déjà rempli.
 
+**Plusieurs comptes pour la même appli** (ex. 2 comptes Steam) : associe-les tous ; Ctrl+Alt+L te demande lequel,
+avec tes notes. Ou bien sélectionne le compte dans CoffreFort puis fais Ctrl+Alt+L dans l'appli : il est utilisé directement.
+**Depuis CoffreFort** : sélectionne un compte puis Ctrl+Alt+L (ou le bouton « ⌨ Remplir l'appli ») : CoffreFort trouve
+la fenêtre ouverte de l'appli et la remplit.
+**Retirer une association** : bouton « Retirer » dans la fiche du compte, ou « Retirer de cette appli » dans la fenêtre de choix.
+
 Sécurité : la saisie ne vise que la fenêtre qui était active au moment du raccourci, et s'arrête net si une autre
 fenêtre passe devant. Les applis associées sont listées dans chaque fiche (« Applis Windows ») et modifiables.
 Une appli lancée **en administrateur** refuse la saisie venant d'un programme normal : CoffreFort te le signale.
 Si le coffre est verrouillé, CoffreFort s'ouvre ; une fois déverrouillé, la fenêtre de choix apparaît.
+
+## Verrouillage et Windows Hello (⚙ Réglages → Verrouillage et Windows Hello…)
+
+- **Verrouillage avec Windows** (activé par défaut) : CoffreFort se verrouille quand tu verrouilles ta session (Win+L)
+  ou quand le PC se met en veille, en plus du verrouillage après 5 minutes sans activité.
+- **Déverrouiller avec Windows Hello** (à activer) : après un verrouillage, le bouton « 🖐 Déverrouiller avec Windows Hello »
+  rouvre le coffre avec ton code PIN, ton empreinte ou ton visage. Le mot de passe maître reste demandé à chaque démarrage
+  de CoffreFort et au moins toutes les 12 heures. Entre-temps, la clé du coffre reste en mémoire, chiffrée par Windows
+  pour CoffreFort seul (CryptProtectMemory) ; elle est effacée à la fermeture de l'appli.
