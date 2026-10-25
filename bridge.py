@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import queue
+import re
 import secrets
 import threading
 from multiprocessing.connection import AuthenticationError, Client, Listener
@@ -62,6 +63,30 @@ def page_host(url: str) -> str | None:
     if not isinstance(url, str) or urlsplit(url).scheme not in ("http", "https"):
         return None
     return _host(url) or None
+
+
+# Pages servies par d'autres extensions connues : le navigateur interdit d'y écrire,
+# mais on peut proposer les comptes du service pour les copier.
+KNOWN_EXTENSIONS = {
+    "bigefpfhnfcobdlfbedofhhaibnlghod": {"name": "MEGA", "hosts": ["mega.nz", "mega.io", "mega.co.nz"], "words": ["mega"]},
+}
+
+
+def extension_page(url: str) -> dict | None:
+    """Infos du service si `url` est une page d'une extension connue (ex. MEGA), sinon None."""
+    if not isinstance(url, str):
+        return None
+    parts = urlsplit(url)
+    if parts.scheme not in ("chrome-extension", "extension"):
+        return None
+    return KNOWN_EXTENSIONS.get((parts.hostname or "").lower())
+
+
+def entry_matches_service(entry: dict, service: dict) -> bool:
+    if any(entry_matches(entry, h) for h in service["hosts"]):
+        return True
+    site = entry.get("site", "").lower()
+    return any(re.search(rf"\b{re.escape(w)}\b", site) for w in service["words"])
 
 
 def entry_matches(entry: dict, host: str) -> bool:

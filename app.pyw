@@ -2053,14 +2053,29 @@ class App(tk.Tk):
         if not self._is_paired(req.get("token")):
             return {"error": "not_paired"}
 
-        host = bridge.page_host(req.get("url"))
-        if not host:
-            return {"error": "bad_url"}
-        matches = [e for e in self.vault.entries if bridge.entry_matches(e, host)]
+        service = bridge.extension_page(req.get("url"))
+        if service:  # page d'une autre extension (MEGA…) : lister et copier, mais pas remplir
+            host, fillable = service["hosts"][0], False
+            matches = [e for e in self.vault.entries if bridge.entry_matches_service(e, service)]
+        else:
+            host, fillable = bridge.page_host(req.get("url")), True
+            if not host:
+                return {"error": "bad_url"}
+            matches = [e for e in self.vault.entries if bridge.entry_matches(e, host)]
         if kind == "list":
-            return {"ok": True, "host": host,
+            return {"ok": True, "host": host, "fillable": fillable, "service": service["name"] if service else None,
                     "entries": [{"id": e["id"], "site": e["site"], "username": e["username"],
                                  "email": e.get("email", "")} for e in matches]}
+        if kind == "copy":
+            # Copie faite par CoffreFort : hors historique Win+V, effacée après quelques secondes.
+            e = next((e for e in matches if e["id"] == req.get("id")), None)
+            field = req.get("field")
+            if e is None or field not in ("username", "email", "password") or not e.get(field):
+                return {"error": "no_match"}
+            self.copy_text(e[field], {"password": "Mot de passe", "email": "E-mail"}.get(field, "Identifiant"))
+            return {"ok": True, "seconds": CLIPBOARD_CLEAR_SECONDS}
+        if not fillable and kind in ("fill", "create"):
+            return {"error": "not_fillable"}
         if kind == "fill":
             e = next((e for e in matches if e["id"] == req.get("id")), None)
             if e is None:

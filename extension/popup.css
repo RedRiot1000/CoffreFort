@@ -71,3 +71,7 @@ input, select {
 input { width: 100%; margin: 8px 0 6px; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 #status { margin-top: 8px; }
+
+.copyrow { cursor: default; display: block; }
+.copyrow .row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.copyrow .row button { font-size: 12px; padding: 4px 8px; }

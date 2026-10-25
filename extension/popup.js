@@ -105,8 +105,13 @@ async function showPair() {
 
 async function showEntries() {
   const res = await request("list", { url: tab?.url || "" });
-  if (res.error === "bad_url") return message("Page non compatible", "CoffreFort fonctionne sur les sites web (http/https).");
+  if (res.error === "bad_url") {
+    return message("Page non compatible",
+      "Le navigateur interdit de remplir cette page (page interne ou d'une autre extension). Ouvre CoffreFort pour copier ton identifiant et ton mot de passe.",
+      "Ouvrir CoffreFort", () => request("focus"));
+  }
   if (res.error) return message("Erreur", esc(res.error));
+  if (res.fillable === false) return showCopyOnly(res);
 
   const host = res.host;
   const insecure = tab.url.startsWith("http://");
@@ -152,6 +157,33 @@ async function showEntries() {
     status.textContent = "✔ Enregistré dans CoffreFort. " + (result === "ok" ? "" : FILL_RESULT[result] || "");
     if (result === "ok") setTimeout(() => window.close(), 1200);
   };
+}
+
+// Page d'une autre extension (ex. MEGA) : le navigateur bloque le remplissage, on propose la copie.
+// C'est CoffreFort qui copie : rien ne transite par l'extension, et le presse-papiers est vidé ensuite.
+function showCopyOnly(res) {
+  const items = res.entries.map((e) => `
+    <div class="entry copyrow">
+      <span class="site">${esc(e.site)}</span>
+      <span class="user">${esc(e.username || e.email || "(sans identifiant)")}</span>
+      <div class="row">
+        ${e.username ? `<button data-id="${esc(e.id)}" data-field="username">Copier l'identifiant</button>` : ""}
+        ${e.email ? `<button data-id="${esc(e.id)}" data-field="email">Copier l'e-mail</button>` : ""}
+        <button class="accent" data-id="${esc(e.id)}" data-field="password">Copier le mot de passe</button>
+      </div>
+    </div>`).join("");
+  render(`
+    <div class="host">${esc(res.service || res.host)}</div>
+    <div class="warn">Cette page appartient à l'extension ${esc(res.service || "")} : le navigateur interdit de la remplir automatiquement. Copie puis colle (Ctrl+V).</div>
+    <div class="list">${items || `<p class="muted">Aucun compte ${esc(res.service || "")} dans CoffreFort.</p>`}</div>
+    <div id="status" class="muted"></div>`);
+  const status = document.getElementById("status");
+  document.querySelectorAll("button[data-field]").forEach((btn) => {
+    btn.onclick = async () => {
+      const r = await request("copy", { url: tab.url, id: btn.dataset.id, field: btn.dataset.field });
+      status.textContent = r.ok ? `✔ Copié — effacé du presse-papiers dans ${r.seconds} s. Colle avec Ctrl+V.` : "Refusé : " + r.error;
+    };
+  });
 }
 
 init();

@@ -5,6 +5,11 @@
 """
 
 NOTES = [
+    (11, "Pages de l'extension MEGA", [
+        "Sur la page de connexion de l'extension MEGA (que le navigateur interdit de remplir), CoffreFort propose "
+        "tes comptes MEGA avec des boutons « Copier ».",
+        "La copie est faite par CoffreFort : invisible dans l'historique du presse-papiers et effacée après 20 secondes.",
+    ]),
     (10, "Fenêtre des nouveautés", [
         "Après chaque mise à jour, cette fenêtre te montre ce qui a changé.",
         "Tu peux la revoir à tout moment : ⚙ Réglages → Nouveautés…",
