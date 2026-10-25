@@ -125,3 +125,12 @@ Si le coffre est verrouillé, CoffreFort s'ouvre ; une fois déverrouillé, la f
   rouvre le coffre avec ton code PIN, ton empreinte ou ton visage. Le mot de passe maître reste demandé à chaque démarrage
   de CoffreFort et au moins toutes les 12 heures. Entre-temps, la clé du coffre reste en mémoire, chiffrée par Windows
   pour CoffreFort seul (CryptProtectMemory) ; elle est effacée à la fermeture de l'appli.
+
+## Catégories et favoris
+
+- La barre de gauche filtre : **Tous les comptes**, **★ Favoris**, puis tes **catégories** (Jeux, Réseaux sociaux, Mails,
+  Banque, Achats, Travail au départ). « ＋ Nouvelle catégorie » en crée une ; **clic droit** pour la renommer ou la supprimer
+  (ses comptes passent « Sans catégorie », rien n'est effacé).
+- **Favori** : clique sur l'étoile ☆ dans la liste ou en haut de la fiche. Les favoris sont toujours en tête de liste.
+- **Catégorie d'un compte** : clique sur la pastille sous son nom dans la fiche, ou choisis-la dans « Modifier ».
+  Un compte ajouté pendant qu'une catégorie est affichée y est rangé automatiquement.

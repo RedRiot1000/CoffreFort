@@ -109,11 +109,15 @@ def normalize_recovery_key(text: str) -> str:
     return "-".join(raw[i:i + RECOVERY_GROUP_LEN] for i in range(0, len(raw), RECOVERY_GROUP_LEN))
 
 
+DEFAULT_CATEGORIES = ["Jeux", "Réseaux sociaux", "Mails", "Banque", "Achats", "Travail"]
+
+
 class Vault:
     def __init__(self, path: str):
         self.path = path
         self.entries: list[dict] = []
         self.paired: list[dict] = []  # extensions navigateur associées (empreintes de jetons)
+        self.categories: list[str] = []
         self.on_saved = None  # appelé après chaque écriture réussie (sauvegarde cloud)
         self._data_key: bytearray | None = None
         self._slots: dict = {}
@@ -141,6 +145,7 @@ class Vault:
         self._slots = {}
         self.entries = []
         self.paired = []
+        self.categories = []
         self.forget_suspended()
 
     # ---------- verrouillage rapide (Windows Hello) ----------
@@ -190,6 +195,7 @@ class Vault:
                        "recovery": _wrap(data_key, recovery, "recovery")}
         self._data_key = bytearray(data_key)
         self.entries = []
+        self.categories = list(DEFAULT_CATEGORIES)
         self.save()
         return recovery
 
@@ -209,6 +215,7 @@ class Vault:
         data = json.loads(plain.decode("utf-8"))
         self.entries = data.get("entries", [])
         self.paired = data.get("paired", [])
+        self.categories = data.get("categories", list(DEFAULT_CATEGORIES))
         self._slots = blob["slots"]
         self._data_key = bytearray(data_key)
 
@@ -226,7 +233,8 @@ class Vault:
         if self._data_key is None:
             raise VaultError("Coffre verrouillé.")
         nonce = secrets.token_bytes(12)
-        plain = json.dumps({"entries": self.entries, "paired": self.paired}, ensure_ascii=False).encode("utf-8")
+        plain = json.dumps({"entries": self.entries, "paired": self.paired, "categories": self.categories},
+                           ensure_ascii=False).encode("utf-8")
         ct = AESGCM(bytes(self._data_key)).encrypt(nonce, plain, _aad({"format": FORMAT, "version": VERSION}))
         blob = {"format": FORMAT, "version": VERSION, "slots": self._slots,
                 "nonce": _b64e(nonce), "ciphertext": _b64e(ct)}
@@ -275,11 +283,11 @@ class Vault:
 
     # ---------- entrées ----------
     def add(self, site: str, username: str, password: str, url: str = "", notes: str = "", email: str = "",
-            apps: list | None = None) -> dict:
+            apps: list | None = None, category: str = "", favorite: bool = False) -> dict:
         now = time.time()
         entry = {
             "id": uuid.uuid4().hex, "site": site, "username": username, "email": email, "password": password,
-            "url": url, "notes": notes, "apps": list(apps or []), "created": now, "modified": now,
+            "url": url, "notes": notes, "apps": list(apps or []), "category": category, "favorite": favorite, "created": now, "modified": now,
         }
         self.entries.append(entry)
         self.save()
@@ -293,6 +301,36 @@ class Vault:
                 self.save()
                 return e
         raise VaultError("Entrée introuvable.")
+
+    # ---------- catégories ----------
+    def add_category(self, name: str):
+        name = name.strip()
+        if not name:
+            raise VaultError("Nom de catégorie vide.")
+        if name.lower() in (c.lower() for c in self.categories):
+            raise VaultError("Cette catégorie existe déjà.")
+        self.categories.append(name)
+        self.save()
+
+    def rename_category(self, old: str, new: str):
+        new = new.strip()
+        if not new:
+            raise VaultError("Nom de catégorie vide.")
+        if new.lower() != old.lower() and new.lower() in (c.lower() for c in self.categories):
+            raise VaultError("Cette catégorie existe déjà.")
+        self.categories = [new if c == old else c for c in self.categories]
+        for e in self.entries:
+            if e.get("category") == old:
+                e["category"] = new
+        self.save()
+
+    def delete_category(self, name: str):
+        """Supprime la catégorie ; ses comptes passent « Sans catégorie » (rien n'est effacé)."""
+        self.categories = [c for c in self.categories if c != name]
+        for e in self.entries:
+            if e.get("category") == name:
+                e["category"] = ""
+        self.save()
 
     def delete(self, entry_id: str):
         self.entries = [e for e in self.entries if e["id"] != entry_id]

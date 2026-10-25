@@ -12,7 +12,7 @@ import time
 import tkinter as tk
 import webbrowser
 from ctypes import wintypes
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -57,11 +57,53 @@ def program_compiles():
     except (OSError, SyntaxError, ValueError):
         return False
 
-BG = "#1e1f24"
-PANEL = "#2a2c33"
-FG = "#e8e8ea"
-MUTED = "#9a9ca5"
-ACCENT = "#4f8cff"
+BG = "#121318"
+SIDEBAR = "#17181f"
+PANEL = "#1d1f27"
+CARD = "#252833"
+HOVER = "#2b2f3d"
+HOVER_SOFT = "#20222b"
+BORDER = "#2a2d39"
+FG = "#eceef4"
+MUTED = "#8a8fa3"
+ACCENT = "#6c7bff"
+ACCENT_HOVER = "#5868f0"
+GOLD = "#f5c451"
+WARN = "#f0ad4e"
+
+AVATAR_COLORS = ["#6c7bff", "#9b6cff", "#ff6c9b", "#ff8f5a", "#f5c451", "#3fc380", "#2bb5c9", "#5a9bff"]
+CATEGORY_ICONS = [("jeu", "🎮"), ("game", "🎮"), ("réseau", "💬"), ("social", "💬"), ("mail", "✉"), ("banque", "🏦"),
+                  ("bank", "🏦"), ("achat", "🛒"), ("shop", "🛒"), ("travail", "💼"), ("pro", "💼"), ("école", "🎓"),
+                  ("étude", "🎓"), ("stream", "🎬"), ("vidéo", "🎬"), ("musique", "🎵"), ("crypto", "🪙"),
+                  ("santé", "❤"), ("admin", "🏛"), ("impôt", "🏛")]
+
+
+def category_icon(name: str) -> str:
+    low = (name or "").lower()
+    return next((icon for key, icon in CATEGORY_ICONS if key in low), "📁")
+
+
+def avatar_color(name: str) -> str:
+    return AVATAR_COLORS[sum(map(ord, (name or "?").lower())) % len(AVATAR_COLORS)]
+
+
+def avatar_dot(root, name: str):
+    """Pastille de couleur (une par site) pour la liste ; images gardées en cache sur la fenêtre."""
+    color = avatar_color(name)
+    cache = root.__dict__.setdefault("_dots", {})
+    if color not in cache:
+        size, r = 14, 6.5
+        img = tk.PhotoImage(width=size, height=size)
+        rows = []
+        for y in range(size):
+            row = []
+            for x in range(size):
+                inside = (x - r) ** 2 + (y - r) ** 2 <= r * r
+                row.append(color if inside else PANEL)
+            rows.append("{" + " ".join(row) + "}")
+        img.put(" ".join(rows))
+        cache[color] = img
+    return cache[color]
 
 
 # ---------------------------------------------------------------- presse-papiers
@@ -259,8 +301,8 @@ class App(tk.Tk):
         super().__init__()
         version = updater.current_version()
         self.title(f"CoffreFort  (version {version})" if version else "CoffreFort")
-        self.geometry("980x600")
-        self.minsize(980, 520)
+        self.geometry("1240x720")
+        self.minsize(1060, 600)
         self.configure(bg=BG)
         self._setup_style()
 
@@ -322,37 +364,56 @@ class App(tk.Tk):
     def _setup_style(self):
         s = ttk.Style(self)
         s.theme_use("clam")
-        s.configure(".", background=BG, foreground=FG, fieldbackground=PANEL, font=("Segoe UI", 10),
-                    bordercolor="#3a3c44", lightcolor=PANEL, darkcolor=PANEL, insertcolor=FG)
+        s.configure(".", background=BG, foreground=FG, fieldbackground=CARD, font=("Segoe UI", 10),
+                    bordercolor=BORDER, lightcolor=CARD, darkcolor=CARD, insertcolor=FG, focuscolor=ACCENT)
         s.configure("TFrame", background=BG)
         s.configure("Panel.TFrame", background=PANEL)
         s.configure("TLabel", background=BG, foreground=FG)
         s.configure("Panel.TLabel", background=PANEL, foreground=FG)
         s.configure("Muted.TLabel", background=PANEL, foreground=MUTED, font=("Segoe UI", 9))
-        s.configure("Title.TLabel", background=BG, foreground=FG, font=("Segoe UI Semibold", 20))
+        s.configure("Title.TLabel", background=BG, foreground=FG, font=("Segoe UI Semibold", 22))
         s.configure("Sub.TLabel", background=BG, foreground=MUTED)
         s.configure("Value.TLabel", background=PANEL, foreground=FG, font=("Segoe UI", 11))
         s.configure("Mono.TLabel", background=PANEL, foreground=FG, font=("Consolas", 12))
-        s.configure("Warn.TLabel", background=PANEL, foreground="#f0ad4e")
-        s.configure("Code.TLabel", background=PANEL, foreground="#ffd166", font=("Consolas", 26, "bold"))
-        s.configure("TMenubutton", background="#3a3c44", foreground=FG, padding=(10, 5), borderwidth=0)
-        s.map("TMenubutton", background=[("active", "#4a4c55")])
-        s.configure("Error.TLabel", background=BG, foreground="#ff6b6b")
-        s.configure("TButton", background="#3a3c44", foreground=FG, padding=(10, 5), borderwidth=0)
-        s.map("TButton", background=[("active", "#4a4c55"), ("disabled", "#2e3036")],
-              foreground=[("disabled", MUTED)])
-        s.configure("Accent.TButton", background=ACCENT, foreground="white")
-        s.map("Accent.TButton", background=[("active", "#3b78ee"), ("disabled", "#2e3a55")])
-        s.configure("Danger.TButton", background="#7a2e2e", foreground="white")
-        s.map("Danger.TButton", background=[("active", "#963838")])
-        s.configure("TEntry", padding=6)
-        s.configure("TCheckbutton", background=PANEL, foreground=FG)
-        s.map("TCheckbutton", background=[("active", PANEL)])
-        s.configure("Horizontal.TScale", background=PANEL, troughcolor="#3a3c44")
-        s.configure("Treeview", background=PANEL, fieldbackground=PANEL, foreground=FG, rowheight=30,
-                    borderwidth=0)
-        s.configure("Treeview.Heading", background="#33353d", foreground=MUTED, borderwidth=0)
-        s.map("Treeview", background=[("selected", ACCENT)], foreground=[("selected", "white")])
+        s.configure("Warn.TLabel", background=PANEL, foreground=WARN)
+        s.configure("Code.TLabel", background=PANEL, foreground=GOLD, font=("Consolas", 26, "bold"))
+        s.configure("Error.TLabel", background=BG, foreground="#ff6b81")
+        for name, bg, hover in (("TButton", CARD, HOVER), ("Ghost.TButton", BG, HOVER), ("Card.TButton", HOVER, "#363a4a")):
+            s.configure(name, background=bg, foreground=FG, padding=(12, 6), borderwidth=0, relief="flat")
+            s.map(name, background=[("active", hover), ("disabled", PANEL)], foreground=[("disabled", MUTED)])
+        s.configure("Card.TButton", padding=(10, 3), font=("Segoe UI", 9))
+        s.configure("Accent.TButton", background=ACCENT, foreground="white", padding=(14, 6),
+                    font=("Segoe UI Semibold", 10))
+        s.map("Accent.TButton", background=[("active", ACCENT_HOVER), ("disabled", "#2e3460")])
+        s.configure("Danger.TButton", background="#3a2229", foreground="#ff8a9b", padding=(12, 6), borderwidth=0)
+        s.map("Danger.TButton", background=[("active", "#55283a")])
+        for name, bg in (("TMenubutton", CARD), ("Ghost.TMenubutton", BG)):
+            s.configure(name, background=bg, foreground=FG, padding=(12, 6), borderwidth=0, arrowcolor=MUTED)
+            s.map(name, background=[("active", HOVER)])
+        s.configure("TEntry", padding=7, fieldbackground=CARD, bordercolor=BORDER, lightcolor=CARD, darkcolor=CARD)
+        s.map("TEntry", bordercolor=[("focus", ACCENT)], lightcolor=[("focus", ACCENT)])
+        s.configure("TCombobox", padding=5, fieldbackground=CARD, background=CARD, arrowcolor=MUTED,
+                    bordercolor=BORDER, lightcolor=CARD, darkcolor=CARD)
+        s.map("TCombobox", fieldbackground=[("readonly", CARD)], foreground=[("readonly", FG)],
+              selectbackground=[("readonly", CARD)], selectforeground=[("readonly", FG)])
+        self.option_add("*TCombobox*Listbox.background", CARD)
+        self.option_add("*TCombobox*Listbox.foreground", FG)
+        self.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
+        self.option_add("*TCombobox*Listbox.font", ("Segoe UI", 10))
+        s.configure("TCheckbutton", background=PANEL, foreground=FG, indicatorbackground=CARD,
+                    indicatorforeground=ACCENT)
+        s.map("TCheckbutton", background=[("active", PANEL)], indicatorbackground=[("selected", ACCENT)])
+        s.configure("Horizontal.TScale", background=PANEL, troughcolor=CARD)
+        s.configure("Treeview", background=PANEL, fieldbackground=PANEL, foreground=FG, rowheight=38,
+                    borderwidth=0, font=("Segoe UI", 10))
+        s.configure("Treeview.Heading", background=PANEL, foreground=MUTED, borderwidth=0, relief="flat",
+                    font=("Segoe UI", 9), padding=(6, 6))
+        s.map("Treeview.Heading", background=[("active", PANEL)])
+        s.map("Treeview", background=[("selected", HOVER)], foreground=[("selected", FG)])
+        s.layout("Treeview", [("Treeview.treearea", {"sticky": "nswe"})])  # sans bordure
+        s.configure("Dark.Vertical.TScrollbar", background=CARD, troughcolor=PANEL, bordercolor=PANEL,
+                    arrowcolor=MUTED, lightcolor=CARD, darkcolor=CARD, gripcount=0)
+        s.map("Dark.Vertical.TScrollbar", background=[("active", HOVER)])
 
     def _clear_body(self):
         for w in self.body.winfo_children():
@@ -590,20 +651,29 @@ class App(tk.Tk):
         self._via_hello = False
         self._clear_body()
         self.current = None
+        if not hasattr(self, "filter"):
+            self.filter = "all"
 
-        top = ttk.Frame(self.body, style="TFrame", padding=(12, 10))
+        # --- barre du haut
+        top = tk.Frame(self.body, bg=BG, padx=16, pady=12)
         top.pack(fill="x")
+        tk.Label(top, text="🔒", bg=BG, fg=ACCENT, font=("Segoe UI Emoji", 16)).pack(side="left")
+        tk.Label(top, text="CoffreFort", bg=BG, fg=FG, font=("Segoe UI Semibold", 15)).pack(side="left", padx=(6, 22))
+        search_box = tk.Frame(top, bg=CARD, padx=10, pady=2, highlightthickness=1, highlightbackground=BORDER,
+                              highlightcolor=ACCENT)
+        search_box.pack(side="left")
+        tk.Label(search_box, text="🔍", bg=CARD, fg=MUTED, font=("Segoe UI Emoji", 10)).pack(side="left")
         self.search_var = tk.StringVar()
-        search = ttk.Entry(top, textvariable=self.search_var, width=34)
-        search.pack(side="left")
-        search.insert(0, "")
+        search = tk.Entry(search_box, textvariable=self.search_var, width=34, bg=CARD, fg=FG, insertbackground=FG,
+                          relief="flat", font=("Segoe UI", 11), highlightthickness=0)
+        search.pack(side="left", padx=(6, 0), ipady=5)
         search.focus_set()
         self.search_var.trace_add("write", lambda *_: self.refresh_list())
-        ttk.Label(top, text="  🔍 Rechercher", style="Sub.TLabel").pack(side="left")
-        ttk.Button(top, text="🔒 Verrouiller", command=self.lock).pack(side="right")
-        settings = ttk.Menubutton(top, text="⚙ Réglages")
-        menu = tk.Menu(settings, tearoff=False, bg=PANEL, fg=FG, activebackground=ACCENT, activeforeground="white",
-                       relief="flat", font=("Segoe UI", 10))
+
+        ttk.Button(top, text="🔒  Verrouiller", style="Ghost.TButton", command=self.lock).pack(side="right")
+        settings = ttk.Menubutton(top, text="⚙  Réglages", style="Ghost.TMenubutton")
+        menu = tk.Menu(settings, tearoff=False, bg=CARD, fg=FG, activebackground=ACCENT, activeforeground="white",
+                       relief="flat", font=("Segoe UI", 10), bd=0)
         menu.add_command(label="Mot de passe maître…", command=self.change_master)
         menu.add_command(label="Clé de secours…", command=self.regenerate_recovery)
         menu.add_command(label="Extensions navigateur…", command=self.manage_extensions)
@@ -613,32 +683,58 @@ class App(tk.Tk):
             menu.add_command(label="Mises à jour…", command=self.update_dialog)
         settings["menu"] = menu
         settings.pack(side="right", padx=6)
-        ttk.Button(top, text="🎲 Générateur", command=self.open_generator).pack(side="right")
-        ttk.Button(top, text="＋ Ajouter", style="Accent.TButton", command=self.add_entry).pack(side="right", padx=6)
+        ttk.Button(top, text="🎲  Générateur", style="Ghost.TButton", command=self.open_generator).pack(side="right")
+        ttk.Button(top, text="＋  Ajouter", style="Accent.TButton", command=self.add_entry).pack(side="right", padx=6)
 
-        main = ttk.Frame(self.body, style="TFrame", padding=(12, 0, 12, 12))
+        # --- statut (en bas)
+        self.status = tk.Label(self.body, text="", bg=BG, fg=MUTED, anchor="w", padx=16, pady=6,
+                               font=("Segoe UI", 9))
+        self.status.pack(fill="x", side="bottom")
+
+        # --- barre latérale | liste | fiche
+        main = tk.Frame(self.body, bg=BG, padx=16)
         main.pack(fill="both", expand=True)
-        main.columnconfigure(0, weight=3)
-        main.columnconfigure(1, weight=2)
+        main.columnconfigure(1, weight=3)
+        main.columnconfigure(2, weight=2, minsize=360)
         main.rowconfigure(0, weight=1)
 
-        self.tree = ttk.Treeview(main, columns=("site", "user"), show="headings", selectmode="browse")
-        self.tree.heading("site", text="Site / Appli")
-        self.tree.heading("user", text="Identifiant")
-        self.tree.column("site", width=240)
-        self.tree.column("user", width=240)
-        self.tree.grid(row=0, column=0, sticky="nsew")
+        self.sidebar = tk.Frame(main, bg=SIDEBAR, width=210, padx=8, pady=10)
+        self.sidebar.grid(row=0, column=0, sticky="ns", padx=(0, 12))
+        self.sidebar.pack_propagate(False)
+
+        list_card = tk.Frame(main, bg=PANEL, highlightthickness=1, highlightbackground=BORDER)
+        list_card.grid(row=0, column=1, sticky="nsew")
+        self.list_title = tk.Label(list_card, text="", bg=PANEL, fg=FG, anchor="w", padx=14, pady=10,
+                                   font=("Segoe UI Semibold", 12))
+        self.list_title.pack(fill="x")
+        holder = tk.Frame(list_card, bg=PANEL)
+        holder.pack(fill="both", expand=True)
+        self.tree = ttk.Treeview(holder, columns=("site", "user", "cat", "fav"), displaycolumns=("user", "cat", "fav"),
+                                 show="tree headings", selectmode="browse")
+        self.tree.heading("#0", text="  Site / Appli", anchor="w")
+        self.tree.heading("user", text="Identifiant", anchor="w")
+        self.tree.heading("cat", text="Catégorie", anchor="w")
+        self.tree.heading("fav", text="★")
+        self.tree.column("#0", width=210, minwidth=140)
+        self.tree.column("user", width=190, minwidth=100)
+        self.tree.column("cat", width=160, minwidth=80)
+        self.tree.column("fav", width=40, minwidth=40, stretch=False, anchor="center")
+        scroll = ttk.Scrollbar(holder, orient="vertical", command=self.tree.yview, style="Dark.Vertical.TScrollbar")
+        self.tree.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        self.tree.pack(side="left", fill="both", expand=True)
+        self.tree.tag_configure("fav", foreground=FG)
         self.tree.bind("<<TreeviewSelect>>", lambda _: self.show_details())
         # Choix fait par l'utilisateur (clic ou flèches), pas une sélection automatique.
         self.tree.bind("<ButtonRelease-1>", self._arm, add="+")
         self.tree.bind("<KeyRelease>", self._arm, add="+")
+        self.tree.bind("<Button-1>", self._tree_click, add="+")
         self.tree.bind("<Double-1>", lambda _: self.copy_field("password"))
+        self.empty_hint = tk.Label(holder, text="", bg=PANEL, fg=MUTED, font=("Segoe UI", 10), justify="center")
 
-        self.details = ttk.Frame(main, style="Panel.TFrame", padding=18)
-        self.details.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+        self.details = tk.Frame(main, bg=PANEL, padx=20, pady=18, highlightthickness=1, highlightbackground=BORDER)
+        self.details.grid(row=0, column=2, sticky="nsew", padx=(12, 0))
 
-        self.status = ttk.Label(self.body, text="", style="Sub.TLabel", padding=(12, 0, 12, 8))
-        self.status.pack(fill="x", side="bottom")
         self._auto_backup()
         self.refresh_list()
         self.show_details()
@@ -646,17 +742,149 @@ class App(tk.Tk):
         if pending and time.time() - pending[1] < 120:  # Ctrl+Alt+L appuyé pendant que le coffre était verrouillé
             self.after(300, lambda: self._autotype_request(pending[0]))
 
+    # ---------- barre latérale : favoris et catégories ----------
+    def _filter_items(self, items, f):
+        if f == "fav":
+            return [e for e in items if e.get("favorite")]
+        if f == "none":
+            return [e for e in items if e.get("category", "") not in self.vault.categories]
+        if isinstance(f, tuple):
+            return [e for e in items if e.get("category") == f[1]]
+        return items
+
+    def _render_sidebar(self):
+        sb = self.sidebar
+        for w in sb.winfo_children():
+            w.destroy()
+        entries = self.vault.entries
+
+        def item(key, icon, name, count, menu=None):
+            selected = self.filter == key
+            bg = HOVER if selected else SIDEBAR
+            row = tk.Frame(sb, bg=bg, cursor="hand2")
+            row.pack(fill="x", pady=1)
+            tk.Frame(row, bg=ACCENT if selected else bg, width=3).pack(side="left", fill="y")
+            icon_l = tk.Label(row, text=icon, bg=bg, fg=GOLD if key == "fav" else MUTED, font=("Segoe UI Emoji", 10),
+                              width=2)
+            icon_l.pack(side="left", padx=(8, 4), pady=6)
+            name_l = tk.Label(row, text=name, bg=bg, fg=FG if selected else "#c9ccd8", anchor="w",
+                              font=("Segoe UI Semibold" if selected else "Segoe UI", 10))
+            name_l.pack(side="left", fill="x", expand=True)
+            count_l = tk.Label(row, text=str(count), bg=bg, fg=MUTED, font=("Segoe UI", 9))
+            count_l.pack(side="right", padx=10)
+            parts = (row, icon_l, name_l, count_l)
+
+            def paint(color):
+                for w in parts:
+                    w.config(bg=color)
+            for w in parts:
+                w.bind("<Button-1>", lambda _: self._set_filter(key))
+                if not selected:
+                    w.bind("<Enter>", lambda _: paint(HOVER_SOFT))
+                    w.bind("<Leave>", lambda _: paint(SIDEBAR))
+                if menu:
+                    w.bind("<Button-3>", menu)
+
+        item("all", "🗂", "Tous les comptes", len(entries))
+        item("fav", "★", "Favoris", sum(1 for e in entries if e.get("favorite")))
+        tk.Label(sb, text="CATÉGORIES", bg=SIDEBAR, fg=MUTED, anchor="w", font=("Segoe UI Semibold", 8),
+                 padx=12).pack(fill="x", pady=(16, 4))
+        for c in self.vault.categories:
+            item(("cat", c), category_icon(c), c, sum(1 for e in entries if e.get("category") == c),
+                 menu=lambda ev, c=c: self._category_menu(ev, c))
+        others = len(self._filter_items(entries, "none"))
+        if others:
+            item("none", "📂", "Sans catégorie", others)
+        add = tk.Label(sb, text="＋  Nouvelle catégorie", bg=SIDEBAR, fg=ACCENT, anchor="w", cursor="hand2",
+                       font=("Segoe UI", 10), padx=12, pady=8)
+        add.pack(fill="x", pady=(6, 0))
+        add.bind("<Button-1>", lambda _: self.new_category())
+        tk.Label(sb, text="Clic droit sur une catégorie\npour la renommer ou la supprimer.", bg=SIDEBAR, fg="#5d6175",
+                 justify="left", anchor="w", font=("Segoe UI", 8), padx=12).pack(side="bottom", fill="x")
+
+    def _set_filter(self, key):
+        self.filter = key
+        self.refresh_list()
+
+    def _category_menu(self, event, name):
+        m = tk.Menu(self, tearoff=False, bg=CARD, fg=FG, activebackground=ACCENT, activeforeground="white", bd=0)
+        m.add_command(label="Renommer…", command=lambda: self.rename_category(name))
+        m.add_command(label="Supprimer", command=lambda: self.delete_category(name))
+        m.tk_popup(event.x_root, event.y_root)
+
+    def new_category(self):
+        name = simpledialog.askstring("Nouvelle catégorie", "Nom de la catégorie :", parent=self)
+        if name and self._busy(lambda: self.vault.add_category(name)) is not False:
+            if name.strip() in self.vault.categories:
+                self._set_filter(("cat", name.strip()))
+
+    def rename_category(self, old):
+        new = simpledialog.askstring("Renommer", "Nouveau nom :", initialvalue=old, parent=self)
+        if new and new.strip() != old:
+            self._busy(lambda: self.vault.rename_category(old, new))
+            if self.filter == ("cat", old):
+                self.filter = ("cat", new.strip())
+            self.refresh_list(select_id=self.current["id"] if self.current else None)
+            self.show_details()
+
+    def delete_category(self, name):
+        n = sum(1 for e in self.vault.entries if e.get("category") == name)
+        if messagebox.askyesno("Supprimer la catégorie",
+                               f"Supprimer la catégorie « {name} » ?\n"
+                               + (f"Ses {n} compte(s) ne sont pas supprimés : ils passent « Sans catégorie »." if n else "")):
+            self._busy(lambda: self.vault.delete_category(name))
+            if self.filter == ("cat", name):
+                self.filter = "all"
+            self.refresh_list()
+            self.show_details()
+
+    def toggle_favorite(self, e):
+        self._busy(lambda: self.vault.update(e["id"], favorite=not e.get("favorite")))
+        self.refresh_list(select_id=e["id"])
+        self.show_details()
+
+    def set_category(self, e, name):
+        self._busy(lambda: self.vault.update(e["id"], category=name))
+        self.refresh_list(select_id=e["id"])
+        self.show_details()
+
+    def _tree_click(self, event):
+        # Clic sur l'étoile : favori / pas favori, sans changer de fiche.
+        if self.tree.identify_region(event.x, event.y) == "cell" and self.tree.identify_column(event.x) == "#3":
+            iid = self.tree.identify_row(event.y)
+            e = next((x for x in self.vault.entries if x["id"] == iid), None)
+            if e:
+                self.after(1, lambda: self.toggle_favorite(e))
+
     def refresh_list(self, select_id=None):
+        keep = select_id or (self.tree.selection()[0] if self.tree.selection() else None)
         self.tree.delete(*self.tree.get_children())
-        for e in self.vault.search(self.search_var.get()):
-            self.tree.insert("", "end", iid=e["id"], values=(e["site"], e["username"] or e.get("email", "")))
-        if select_id and self.tree.exists(select_id):
-            self.tree.selection_set(select_id)
-            self.tree.see(select_id)
+        items = self._filter_items(self.vault.search(self.search_var.get()), self.filter)
+        items.sort(key=lambda e: (not e.get("favorite"), e["site"].lower()))
+        for e in items:
+            cat = e.get("category", "")
+            self.tree.insert("", "end", iid=e["id"], text="  " + e["site"], image=avatar_dot(self, e["site"]),
+                             values=(e["site"], e["username"] or e.get("email", ""),
+                                     f"{category_icon(cat)} {cat}" if cat else "", "★" if e.get("favorite") else "☆"))
+        if keep and self.tree.exists(keep):
+            self.tree.selection_set(keep)
+            self.tree.see(keep)
+        titles = {"all": "Tous les comptes", "fav": "★  Favoris", "none": "Sans catégorie"}
+        title = titles.get(self.filter) if not isinstance(self.filter, tuple) else \
+            f"{category_icon(self.filter[1])}  {self.filter[1]}"
+        self.list_title.config(text=f"{title}   ·   {len(items)}")
+        if items:
+            self.empty_hint.place_forget()
+        else:
+            self.empty_hint.config(text="Aucun compte ici.\n\n" + (
+                "Clique sur ☆ dans la liste ou dans une fiche\npour ajouter un favori." if self.filter == "fav" else
+                "Choisis la catégorie dans la fiche d'un compte,\nou clique sur « ＋ Ajouter »."))
+            self.empty_hint.place(relx=0.5, rely=0.4, anchor="center")
+        self._render_sidebar()
         n = len(self.vault.entries)
         cloud = "⚠ sauvegarde cloud en échec" if self._backup_error else (
             "☁ sauvegarde auto activée" if self.settings.get("backup_dir") else "sauvegarde auto désactivée")
-        self.set_status(f"{n} entrée{'s' if n > 1 else ''} · {cloud} · coffre : {self.vault.path}")
+        self.set_status(f"{n} compte{'s' if n > 1 else ''}  ·  {cloud}  ·  {autotype.HOTKEY_LABEL} remplit les applis")
 
     def set_status(self, text):
         if hasattr(self, "status") and self.status.winfo_exists():
@@ -671,78 +899,124 @@ class App(tk.Tk):
     def _arm(self, _=None):
         self._selected_at = time.time()
 
+    # ---------- fiche du compte ----------
     def show_details(self):
         for w in self.details.winfo_children():
             w.destroy()
         e = self._selected()
         self.current = e
         if e is None:
-            ttk.Label(self.details, text="Sélectionne une entrée,\nou clique sur « ＋ Ajouter ».",
-                      style="Muted.TLabel", justify="center").pack(expand=True)
+            box = tk.Frame(self.details, bg=PANEL)
+            box.place(relx=0.5, rely=0.42, anchor="center")
+            tk.Label(box, text="🔐", bg=PANEL, fg=MUTED, font=("Segoe UI Emoji", 34)).pack()
+            tk.Label(box, text="Sélectionne un compte", bg=PANEL, fg=FG, font=("Segoe UI Semibold", 12)).pack(pady=(8, 2))
+            tk.Label(box, text="ou clique sur « ＋ Ajouter ».", bg=PANEL, fg=MUTED, font=("Segoe UI", 10)).pack()
             return
+        d = self.details
 
-        ttk.Label(self.details, text=e["site"], style="Panel.TLabel",
-                  font=("Segoe UI Semibold", 16)).pack(anchor="w", pady=(0, 12))
+        # en-tête : pastille, nom, catégorie, favori
+        head = tk.Frame(d, bg=PANEL)
+        head.pack(fill="x", pady=(0, 14))
+        av = tk.Canvas(head, width=52, height=52, bg=PANEL, highlightthickness=0)
+        av.pack(side="left")
+        color = avatar_color(e["site"])
+        av.create_oval(2, 2, 50, 50, fill=color, outline="")
+        av.create_text(26, 26, text=(e["site"][:1] or "?").upper(), fill="white", font=("Segoe UI Semibold", 20))
+        info = tk.Frame(head, bg=PANEL)
+        info.pack(side="left", fill="x", expand=True, padx=(12, 0))
+        tk.Label(info, text=e["site"], bg=PANEL, fg=FG, anchor="w", font=("Segoe UI Semibold", 16)).pack(fill="x")
+        chips = tk.Frame(info, bg=PANEL)
+        chips.pack(fill="x", pady=(4, 0))
+        cat = e.get("category", "")
+        chip = tk.Label(chips, text=(f"{category_icon(cat)}  {cat}" if cat else "＋ Catégorie") + "  ▾", bg=CARD,
+                        fg=FG if cat else MUTED, padx=10, pady=2, cursor="hand2", font=("Segoe UI", 9))
+        chip.pack(side="left")
 
-        def field(label, value, key=None, secret=False):
-            ttk.Label(self.details, text=label, style="Muted.TLabel").pack(anchor="w")
-            row = ttk.Frame(self.details, style="Panel.TFrame")
-            row.pack(fill="x", pady=(0, 10))
+        def cat_menu(ev):
+            m = tk.Menu(self, tearoff=False, bg=CARD, fg=FG, activebackground=ACCENT, activeforeground="white", bd=0)
+            for c in self.vault.categories:
+                m.add_command(label=f"{category_icon(c)}  {c}" + ("   ✓" if c == cat else ""),
+                              command=lambda c=c: self.set_category(e, c))
+            m.add_separator()
+            m.add_command(label="Sans catégorie", command=lambda: self.set_category(e, ""))
+            m.add_command(label="Nouvelle catégorie…", command=self.new_category)
+            m.tk_popup(ev.x_root, ev.y_root)
+        chip.bind("<Button-1>", cat_menu)
+        fav = e.get("favorite")
+        star = tk.Label(head, text="★" if fav else "☆", bg=PANEL, fg=GOLD if fav else MUTED, cursor="hand2",
+                        font=("Segoe UI Symbol", 20))
+        star.pack(side="right", anchor="n")
+        star.bind("<Button-1>", lambda _: self.toggle_favorite(e))
+
+        def card(label, value, key=None, secret=False, mono=False):
+            c = tk.Frame(d, bg=CARD, padx=12, pady=8)
+            c.pack(fill="x", pady=4)
+            tk.Label(c, text=label, bg=CARD, fg=MUTED, anchor="w", font=("Segoe UI", 8)).pack(fill="x")
+            row = tk.Frame(c, bg=CARD)
+            row.pack(fill="x")
             shown = tk.BooleanVar(value=not secret)
-            lbl = ttk.Label(row, text=value if not secret else "•" * 12,
-                            style="Mono.TLabel" if secret else "Value.TLabel", wraplength=260)
+            lbl = tk.Label(row, text=value if not secret else "•" * 14, bg=CARD, fg=FG, anchor="w", justify="left",
+                           wraplength=230, font=("Consolas", 12) if secret or mono else ("Segoe UI", 11))
             lbl.pack(side="left", fill="x", expand=True)
             if key:
-                ttk.Button(row, text="Copier", command=lambda: self.copy_field(key)).pack(side="right")
+                ttk.Button(row, text="Copier", style="Card.TButton", command=lambda: self.copy_field(key)).pack(side="right")
             if secret:
                 def toggle():
                     shown.set(not shown.get())
-                    lbl.config(text=value if shown.get() else "•" * 12)
+                    lbl.config(text=value if shown.get() else "•" * 14)
                     eye.config(text="Masquer" if shown.get() else "Afficher")
-                eye = ttk.Button(row, text="Afficher", command=toggle)
+                eye = ttk.Button(row, text="Afficher", style="Card.TButton", command=toggle)
                 eye.pack(side="right", padx=4)
+            return c
 
-        field("Identifiant", e["username"] or "—", "username" if e["username"] else None)
+        card("Identifiant", e["username"] or "—", "username" if e["username"] else None)
         if e.get("email"):
-            field("E-mail", e["email"], "email")
-        if e.get("apps"):
-            ttk.Label(self.details, text=f"Applis Windows ({autotype.HOTKEY_LABEL})", style="Muted.TLabel").pack(anchor="w")
-            for app_exe in e["apps"]:
-                row = ttk.Frame(self.details, style="Panel.TFrame")
-                row.pack(fill="x", pady=(0, 2))
-                ttk.Label(row, text=app_exe, style="Value.TLabel").pack(side="left")
-                ttk.Button(row, text="Retirer", command=lambda x=app_exe: self._set_app(e, x, False)).pack(side="right")
-            ttk.Frame(self.details, style="Panel.TFrame", height=8).pack()
-        field("Mot de passe", e["password"], "password", secret=True)
+            card("E-mail", e["email"], "email")
+        pw_card = card("Mot de passe", e["password"], "password", secret=True)
         bits = estimate_entropy(e["password"])
-        text, _ = strength_label(bits)
-        ttk.Label(self.details, text=f"Robustesse : {text} (~{int(bits)} bits)", style="Muted.TLabel").pack(
-            anchor="w", pady=(0, 6))
+        text, color = strength_label(bits)
+        meter = tk.Canvas(pw_card, height=4, bg=BORDER, highlightthickness=0)
+        meter.pack(fill="x", pady=(8, 2))
+        meter.bind("<Configure>", lambda ev: (meter.delete("all"), meter.create_rectangle(
+            0, 0, ev.width * min(bits, 128) / 128, 4, fill=color, width=0)))
+        tk.Label(pw_card, text=f"Robustesse : {text} (~{int(bits)} bits)", bg=CARD, fg=MUTED, anchor="w",
+                 font=("Segoe UI", 8)).pack(fill="x")
         reused = sum(1 for o in self.vault.entries if o["password"] == e["password"]) - 1
         if reused > 0:
-            ttk.Label(self.details, text=f"⚠ Mot de passe réutilisé sur {reused} autre(s) entrée(s)",
-                      style="Warn.TLabel").pack(anchor="w", pady=(0, 6))
+            tk.Label(pw_card, text=f"⚠ Mot de passe réutilisé sur {reused} autre(s) compte(s)", bg=CARD, fg=WARN,
+                     anchor="w", font=("Segoe UI", 9)).pack(fill="x")
         if e["url"]:
-            ttk.Label(self.details, text="Adresse", style="Muted.TLabel").pack(anchor="w")
-            row = ttk.Frame(self.details, style="Panel.TFrame")
-            row.pack(fill="x", pady=(0, 10))
-            ttk.Label(row, text=e["url"], style="Value.TLabel", wraplength=260).pack(side="left", fill="x",
-                                                                                      expand=True)
+            c = card("Adresse", e["url"])
             url = e["url"] if "://" in e["url"] else "https://" + e["url"]
-            ttk.Button(row, text="Ouvrir", command=lambda: webbrowser.open(url)).pack(side="right")
+            ttk.Button(c.winfo_children()[1], text="Ouvrir", style="Card.TButton",
+                       command=lambda: webbrowser.open(url)).pack(side="right")
+        if e.get("apps"):
+            c = tk.Frame(d, bg=CARD, padx=12, pady=8)
+            c.pack(fill="x", pady=4)
+            tk.Label(c, text=f"Applis Windows ({autotype.HOTKEY_LABEL})", bg=CARD, fg=MUTED, anchor="w",
+                     font=("Segoe UI", 8)).pack(fill="x")
+            for app_exe in e["apps"]:
+                row = tk.Frame(c, bg=CARD)
+                row.pack(fill="x", pady=1)
+                tk.Label(row, text=app_exe, bg=CARD, fg=FG, font=("Segoe UI", 10)).pack(side="left")
+                ttk.Button(row, text="Retirer", style="Card.TButton",
+                           command=lambda x=app_exe: self._set_app(e, x, False)).pack(side="right")
         if e["notes"]:
-            ttk.Label(self.details, text="Notes", style="Muted.TLabel").pack(anchor="w")
-            ttk.Label(self.details, text=e["notes"], style="Value.TLabel", wraplength=320,
-                      justify="left").pack(anchor="w", pady=(0, 10))
+            c = tk.Frame(d, bg=CARD, padx=12, pady=8)
+            c.pack(fill="x", pady=4)
+            tk.Label(c, text="Notes", bg=CARD, fg=MUTED, anchor="w", font=("Segoe UI", 8)).pack(fill="x")
+            tk.Label(c, text=e["notes"], bg=CARD, fg=FG, anchor="w", justify="left", wraplength=300,
+                     font=("Segoe UI", 10)).pack(fill="x")
 
-        btns = ttk.Frame(self.details, style="Panel.TFrame")
+        btns = tk.Frame(d, bg=PANEL)
         btns.pack(side="bottom", fill="x")
-        ttk.Button(btns, text="Modifier", command=self.edit_entry).pack(side="left")
-        ttk.Button(btns, text="⌨ Remplir l'appli", command=lambda: self.fill_open_app(e)).pack(side="left", padx=6)
+        ttk.Button(btns, text="✎  Modifier", style="Ghost.TButton", command=self.edit_entry).pack(side="left")
+        ttk.Button(btns, text="⌨ Remplir l'appli", style="Ghost.TButton",
+                   command=lambda: self.fill_open_app(e)).pack(side="left", padx=6)
         ttk.Button(btns, text="Supprimer", style="Danger.TButton", command=self.delete_entry).pack(side="right")
         modified = time.strftime("%d/%m/%Y %H:%M", time.localtime(e["modified"]))
-        ttk.Label(self.details, text=f"Modifié le {modified}", style="Muted.TLabel").pack(side="bottom", anchor="w",
-                                                                                         pady=6)
+        tk.Label(d, text=f"Modifié le {modified}", bg=PANEL, fg=MUTED, anchor="w",
+                 font=("Segoe UI", 8)).pack(side="bottom", fill="x", pady=6)
 
     # ---------- presse-papiers ----------
     def copy_text(self, text, what="Mot de passe"):
@@ -796,6 +1070,10 @@ class App(tk.Tk):
         f = ttk.Frame(d, style="Panel.TFrame", padding=18)
         f.pack(fill="both", expand=True)
         vars_ = {k: tk.StringVar(value=(entry or {}).get(k, "")) for k in ("site", "username", "email", "password", "url")}
+        cat_default = (entry or {}).get("category", "") or (
+            self.filter[1] if not entry and isinstance(getattr(self, "filter", None), tuple) else "")
+        cat_var = tk.StringVar(value=cat_default or "(aucune)")
+        fav_var = tk.BooleanVar(value=(entry or {}).get("favorite", False) or (not entry and getattr(self, "filter", None) == "fav"))
 
         def label(text):
             ttk.Label(f, text=text, style="Muted.TLabel").pack(anchor="w", pady=(6, 2))
@@ -834,6 +1112,12 @@ class App(tk.Tk):
 
         label("Adresse (URL)")
         ttk.Entry(f, textvariable=vars_["url"]).pack(fill="x")
+        label("Catégorie")
+        cat_row = ttk.Frame(f, style="Panel.TFrame")
+        cat_row.pack(fill="x")
+        ttk.Combobox(cat_row, textvariable=cat_var, state="readonly", width=28,
+                     values=["(aucune)"] + self.vault.categories).pack(side="left")
+        ttk.Checkbutton(cat_row, text="★ Favori", variable=fav_var).pack(side="left", padx=12)
         label(f"Applis Windows, remplies avec {autotype.HOTKEY_LABEL} (ex. steamwebhelper.exe)")
         apps_var = tk.StringVar(value=", ".join((entry or {}).get("apps", [])))
         ttk.Entry(f, textvariable=apps_var).pack(fill="x")
@@ -848,6 +1132,8 @@ class App(tk.Tk):
             data["password"] = vars_["password"].get()  # pas de strip sur un mot de passe
             data["notes"] = notes.get("1.0", "end").strip()
             data["apps"] = [a.strip().lower() for a in apps_var.get().replace(";", ",").split(",") if a.strip()]
+            data["category"] = "" if cat_var.get() == "(aucune)" else cat_var.get()
+            data["favorite"] = fav_var.get()
             if not data["site"] or not data["password"]:
                 messagebox.showwarning("Champs manquants", "Le site et le mot de passe sont obligatoires.", parent=d)
                 return
