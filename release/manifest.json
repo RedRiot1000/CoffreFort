@@ -1,9 +1,9 @@
 {
   "format": "coffrefort-update",
   "repo": "RedRiot1000/CoffreFort",
-  "version": 2,
-  "zip": "release/coffrefort-2.zip",
-  "sha256": "0d37a6bb9605eb6208c4e7dfe3160016eba0ca65f48f4b88f35f254c667da34c",
-  "size": 52183,
-  "published": "2026-10-25T03:51:51"
+  "version": 3,
+  "zip": "release/coffrefort-3.zip",
+  "sha256": "565e6a92ce04302205864088504bedc5088d43a911f0e969112daaafe9da7d26",
+  "size": 52731,
+  "published": "2026-10-25T03:57:32"
 }

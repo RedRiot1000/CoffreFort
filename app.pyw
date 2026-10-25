@@ -206,10 +206,17 @@ class GeneratorPanel(ttk.Frame):
 
 
 # ---------------------------------------------------------------- mise à jour en ligne
+LAST_UPDATE_ERROR = None
+
+
 def startup_update_quiet():
+    global LAST_UPDATE_ERROR
     try:
-        return updater.update_now()
-    except Exception:  # noqa: BLE001 - hors ligne, GitHub indisponible, signature refusée : on garde la version actuelle
+        version = updater.update_now()
+        LAST_UPDATE_ERROR = None
+        return version
+    except Exception as ex:  # noqa: BLE001 - hors ligne, GitHub indisponible, signature refusée : on garde la version actuelle
+        LAST_UPDATE_ERROR = str(ex) or type(ex).__name__
         return None
 
 
@@ -577,6 +584,8 @@ class App(tk.Tk):
         menu.add_command(label="Clé de secours…", command=self.regenerate_recovery)
         menu.add_command(label="Extensions navigateur…", command=self.manage_extensions)
         menu.add_command(label="Sauvegarde automatique…", command=self.backup_dialog)
+        if updater.enabled():
+            menu.add_command(label="Mises à jour…", command=self.update_dialog)
         settings["menu"] = menu
         settings.pack(side="right", padx=6)
         ttk.Button(top, text="🎲 Générateur", command=self.open_generator).pack(side="right")
@@ -910,6 +919,52 @@ class App(tk.Tk):
             # La création du coffre tourne dans un thread : on ne touche à l'interface que depuis le principal.
             if threading.current_thread() is threading.main_thread():
                 self.set_status(f"⚠ Sauvegarde cloud échouée : {ex}")
+
+    def update_dialog(self):
+        d = self._dialog("Mises à jour")
+        f = ttk.Frame(d, style="Panel.TFrame", padding=20)
+        f.pack(fill="both", expand=True)
+        ttk.Label(f, text="🔄  Mises à jour", style="Panel.TLabel", font=("Segoe UI Semibold", 15)).pack(anchor="w")
+        ttk.Label(f, text="CoffreFort installe tout seul les nouvelles versions à chaque lancement,\n"
+                          "après avoir vérifié leur signature. Tes mots de passe ne sont jamais envoyés.",
+                  style="Panel.TLabel", justify="left").pack(anchor="w", pady=(6, 12))
+        version_lbl = ttk.Label(f, style="Value.TLabel")
+        version_lbl.pack(anchor="w")
+        info = ttk.Label(f, style="Muted.TLabel", justify="left", wraplength=480)
+        info.pack(anchor="w", pady=(4, 12))
+        version_lbl.config(text=f"Version installée : {updater.current_version()}")
+        if LAST_UPDATE_ERROR:
+            info.config(text=f"⚠ Dernière vérification échouée : {LAST_UPDATE_ERROR}")
+        btns = ttk.Frame(f, style="Panel.TFrame")
+        btns.pack(fill="x")
+        restart_btn = ttk.Button(btns, text="Redémarrer maintenant", style="Accent.TButton", command=self.restart)
+
+        def check():
+            check_btn.config(state="disabled")
+            info.config(text="Recherche en cours…")
+            worker = threading.Thread(target=lambda: result.update(version=startup_update_quiet()), daemon=True)
+            result = {}
+            worker.start()
+
+            def poll():
+                if worker.is_alive():
+                    d.after(200, poll)
+                    return
+                if not d.winfo_exists():
+                    return
+                check_btn.config(state="normal")
+                version_lbl.config(text=f"Version installée : {updater.current_version()}")
+                if result.get("version"):
+                    info.config(text=f"✔ Version {result['version']} installée. Redémarre CoffreFort pour l'utiliser.")
+                    restart_btn.pack(side="left", padx=(8, 0))
+                elif LAST_UPDATE_ERROR:
+                    info.config(text=f"⚠ Vérification impossible : {LAST_UPDATE_ERROR}")
+                else:
+                    info.config(text="✔ CoffreFort est à jour.\n(Une version publiée il y a moins de 5 minutes peut ne pas être encore visible.)")
+            poll()
+        check_btn = ttk.Button(btns, text="Vérifier maintenant", command=check)
+        check_btn.pack(side="left")
+        ttk.Button(btns, text="Fermer", command=d.destroy).pack(side="right")
 
     def backup_dialog(self):
         d = self._dialog("Sauvegarde automatique")
