@@ -131,6 +131,9 @@ Si le coffre est verrouillé, CoffreFort s'ouvre ; une fois déverrouillé, la f
 - La barre de gauche filtre : **Tous les comptes**, **★ Favoris**, puis tes **catégories** (Jeux, Réseaux sociaux, Mails,
   Banque, Achats, Travail au départ). « ＋ Nouvelle catégorie » en crée une ; **clic droit** pour la renommer ou la supprimer
   (ses comptes passent « Sans catégorie », rien n'est effacé).
+- **Glisser-déposer** : attrape une catégorie dans la barre de gauche pour changer son ordre ; attrape un compte dans la
+  liste et lâche-le sur une catégorie pour l'y ranger (sur « Favoris » pour l'ajouter aux favoris, sur « Sans catégorie »
+  pour retirer sa catégorie).
 - **Favori** : clique sur l'étoile ☆ dans la liste ou en haut de la fiche. Les favoris sont toujours en tête de liste.
 - **Catégorie d'un compte** : clique sur la pastille sous son nom dans la fiche, ou choisis-la dans « Modifier ».
   Un compte ajouté pendant qu'une catégorie est affichée y est rangé automatiquement.

@@ -70,6 +70,7 @@ ACCENT = "#6c7bff"
 ACCENT_HOVER = "#5868f0"
 GOLD = "#f5c451"
 WARN = "#f0ad4e"
+DROP = "#2f3a6b"  # catégorie survolée pendant un glisser-déposer
 
 AVATAR_COLORS = ["#6c7bff", "#9b6cff", "#ff6c9b", "#ff8f5a", "#f5c451", "#3fc380", "#2bb5c9", "#5a9bff"]
 CATEGORY_ICONS = [("jeu", "🎮"), ("game", "🎮"), ("réseau", "💬"), ("social", "💬"), ("mail", "✉"), ("banque", "🏦"),
@@ -733,6 +734,9 @@ class App(tk.Tk):
         self.tree.bind("<ButtonRelease-1>", self._arm, add="+")
         self.tree.bind("<KeyRelease>", self._arm, add="+")
         self.tree.bind("<Button-1>", self._tree_click, add="+")
+        self.tree.bind("<ButtonPress-1>", self._tree_press, add="+")
+        self.tree.bind("<B1-Motion>", self._tree_motion, add="+")
+        self.tree.bind("<ButtonRelease-1>", self._tree_release, add="+")
         self.tree.bind("<Double-1>", lambda _: self.copy_field("password"))
         self.empty_hint = tk.Label(holder, text="", bg=PANEL, fg=MUTED, font=("Segoe UI", 10), justify="center")
 
@@ -761,13 +765,18 @@ class App(tk.Tk):
         for w in sb.winfo_children():
             w.destroy()
         entries = self.vault.entries
+        self._sidebar_rows = {}
 
         def item(key, icon, name, count, menu=None):
             selected = self.filter == key
             bg = HOVER if selected else SIDEBAR
             row = tk.Frame(sb, bg=bg, cursor="hand2")
             row.pack(fill="x", pady=1)
-            tk.Frame(row, bg=ACCENT if selected else bg, width=3).pack(side="left", fill="y")
+            row._bg = bg
+            self._sidebar_rows[row] = key
+            mark = tk.Frame(row, bg=ACCENT if selected else bg, width=3)
+            mark._paint = not selected
+            mark.pack(side="left", fill="y")
             icon_l = tk.Label(row, text=icon, bg=bg, fg=GOLD if key == "fav" else MUTED, font=("Segoe UI Emoji", 10),
                               width=2)
             icon_l.pack(side="left", padx=(8, 4), pady=6)
@@ -782,7 +791,9 @@ class App(tk.Tk):
                 for w in parts:
                     w.config(bg=color)
             for w in parts:
-                w.bind("<Button-1>", lambda _: self._set_filter(key))
+                w.bind("<ButtonPress-1>", lambda ev: self._sb_press(key, ev))
+                w.bind("<B1-Motion>", self._sb_motion)
+                w.bind("<ButtonRelease-1>", self._sb_release)
                 if not selected:
                     w.bind("<Enter>", lambda _: paint(HOVER_SOFT))
                     w.bind("<Leave>", lambda _: paint(SIDEBAR))
@@ -803,8 +814,141 @@ class App(tk.Tk):
                        font=("Segoe UI", 10), padx=12, pady=8)
         add.pack(fill="x", pady=(6, 0))
         add.bind("<Button-1>", lambda _: self.new_category())
-        tk.Label(sb, text="Clic droit sur une catégorie\npour la renommer ou la supprimer.", bg=SIDEBAR, fg="#5d6175",
+        tk.Label(sb, text="Glisse une catégorie pour la déplacer,\nun compte sur une catégorie pour l'y ranger.\n"
+                          "Clic droit : renommer / supprimer.", bg=SIDEBAR, fg="#5d6175",
                  justify="left", anchor="w", font=("Segoe UI", 8), padx=12).pack(side="bottom", fill="x")
+
+    # ---------- glisser-déposer : catégories (ordre) et comptes (rangement) ----------
+    DRAG_THRESHOLD = 6
+
+    def _ghost_show(self, text, x, y):
+        if getattr(self, "_ghost", None) is None or not self._ghost.winfo_exists():
+            g = tk.Toplevel(self)
+            g.overrideredirect(True)
+            g.attributes("-topmost", True)
+            try:
+                g.attributes("-alpha", 0.92)
+            except tk.TclError:
+                pass
+            tk.Label(g, text=text, bg=ACCENT, fg="white", padx=10, pady=4, font=("Segoe UI Semibold", 10)).pack()
+            self._ghost = g
+        self._ghost.geometry(f"+{x + 14}+{y + 10}")
+
+    def _ghost_hide(self):
+        if getattr(self, "_ghost", None) is not None and self._ghost.winfo_exists():
+            self._ghost.destroy()
+        self._ghost = None
+
+    def _sidebar_row_at(self, x_root, y_root):
+        """(cadre, clé) de la ligne de barre latérale sous le pointeur, ou (None, None)."""
+        w = self.winfo_containing(x_root, y_root)
+        rows = getattr(self, "_sidebar_rows", {})
+        while w is not None:
+            if w in rows:
+                return w, rows[w]
+            w = getattr(w, "master", None)
+        return None, None
+
+    def _sb_press(self, key, event):
+        self._sb_drag = {"key": key, "y": event.y_root, "active": False}
+
+    def _sb_motion(self, event):
+        drag = getattr(self, "_sb_drag", None)
+        if not drag or not isinstance(drag["key"], tuple):
+            return  # seules les catégories se déplacent
+        if not drag["active"] and abs(event.y_root - drag["y"]) < self.DRAG_THRESHOLD:
+            return
+        drag["active"] = True
+        self._ghost_show(f"{category_icon(drag['key'][1])}  {drag['key'][1]}", event.x_root, event.y_root)
+        index, line_y = self._category_drop_index(event.y_root)
+        drag["index"] = index
+        if getattr(self, "_drop_line", None) is None or not self._drop_line.winfo_exists():
+            self._drop_line = tk.Frame(self.sidebar, bg=ACCENT, height=2)
+        self._drop_line.place(x=8, y=line_y, relwidth=1.0, width=-16)
+        self._drop_line.lift()
+
+    def _category_drop_index(self, y_root):
+        """Position d'insertion selon la hauteur du pointeur, et l'ordonnée du trait de dépôt."""
+        rows = [(f, k) for f, k in self._sidebar_rows.items() if isinstance(k, tuple)]
+        rows.sort(key=lambda fk: fk[0].winfo_rooty())
+        top = self.sidebar.winfo_rooty()
+        for i, (f, _) in enumerate(rows):
+            if y_root < f.winfo_rooty() + f.winfo_height() / 2:
+                return i, f.winfo_rooty() - top - 2
+        last = rows[-1][0] if rows else None
+        return len(rows), (last.winfo_rooty() + last.winfo_height() - top if last else 0)
+
+    def _sb_release(self, event):
+        drag, self._sb_drag = getattr(self, "_sb_drag", None), None
+        self._ghost_hide()
+        if getattr(self, "_drop_line", None) is not None and self._drop_line.winfo_exists():
+            self._drop_line.destroy()
+        self._drop_line = None
+        if not drag:
+            return
+        if not drag["active"]:
+            self._set_filter(drag["key"])  # simple clic
+            return
+        name = drag["key"][1]
+        old = self.vault.categories.index(name)
+        index = drag.get("index", old)
+        if index > old:
+            index -= 1  # la catégorie quitte sa place avant d'être réinsérée
+        self._busy(lambda: self.vault.move_category(name, index))
+        self.refresh_list()
+
+    def _tree_press(self, event):
+        iid = self.tree.identify_row(event.y)
+        self._tree_drag = {"iid": iid, "x": event.x_root, "y": event.y_root, "active": False} if iid else None
+
+    def _tree_motion(self, event):
+        drag = getattr(self, "_tree_drag", None)
+        if not drag:
+            return
+        if not drag["active"] and max(abs(event.x_root - drag["x"]), abs(event.y_root - drag["y"])) < self.DRAG_THRESHOLD:
+            return
+        e = next((x for x in self.vault.entries if x["id"] == drag["iid"]), None)
+        if e is None:
+            return
+        drag["active"] = True
+        self._ghost_show(f"🔑  {e['site']}", event.x_root, event.y_root)
+        frame, key = self._sidebar_row_at(event.x_root, event.y_root)
+        target = frame if key not in (None, "all") else None
+        previous = getattr(self, "_drop_target", None)
+        if previous is not target:
+            if previous is not None and previous.winfo_exists():
+                self._paint_row(previous, previous._bg)
+            if target is not None:
+                self._paint_row(target, DROP)
+            self._drop_target = target
+        return "break"  # sinon la liste déplace la sélection pendant le glisser
+
+    def _tree_release(self, event):
+        drag, self._tree_drag = getattr(self, "_tree_drag", None), None
+        target, self._drop_target = getattr(self, "_drop_target", None), None
+        self._ghost_hide()
+        if not drag or not drag["active"]:
+            return
+        if target is not None and target.winfo_exists():
+            self._paint_row(target, target._bg)
+        _, key = self._sidebar_row_at(event.x_root, event.y_root)
+        e = next((x for x in self.vault.entries if x["id"] == drag["iid"]), None)
+        if e is None or key in (None, "all"):
+            return
+        if key == "fav":
+            if not e.get("favorite"):
+                self.toggle_favorite(e)
+            self.set_status(f"« {e['site']} » ajouté aux favoris.")
+        elif key == "none":
+            self.set_category(e, "")
+            self.set_status(f"« {e['site']} » n'a plus de catégorie.")
+        elif isinstance(key, tuple):
+            self.set_category(e, key[1])
+            self.set_status(f"« {e['site']} » rangé dans {key[1]}.")
+
+    def _paint_row(self, row, color):
+        for w in [row] + [c for c in row.winfo_children() if getattr(c, "_paint", True)]:
+            w.config(bg=color)
 
     def _set_filter(self, key):
         self.filter = key

@@ -312,6 +312,16 @@ class Vault:
         self.categories.append(name)
         self.save()
 
+    def move_category(self, name: str, index: int):
+        """Déplace une catégorie à la position `index` (ordre de la barre latérale)."""
+        if name not in self.categories:
+            raise VaultError("Catégorie introuvable.")
+        cats = [c for c in self.categories if c != name]
+        cats.insert(max(0, min(index, len(cats))), name)
+        if cats != self.categories:
+            self.categories = cats
+            self.save()
+
     def rename_category(self, old: str, new: str):
         new = new.strip()
         if not new:
