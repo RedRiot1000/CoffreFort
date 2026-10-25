@@ -19,6 +19,7 @@ sys.path.insert(0, HERE)
 import backup  # noqa: E402
 import autotype  # noqa: E402
 import bridge  # noqa: E402
+import nouveautes  # noqa: E402
 import updater  # noqa: E402
 import winsec  # noqa: E402
 from vault import Vault, VaultError, WrongPassword, estimate_entropy, generate_password, strength_label  # noqa: E402
@@ -28,7 +29,7 @@ AUTO_LOCK_SECONDS = 5 * 60
 HELLO_MAX_HOURS = 12
 CLIPBOARD_CLEAR_SECONDS = 20
 MIN_MASTER_LENGTH = 12
-PROGRAM_FILES = ("app.pyw", "vault.py", "bridge.py", "backup.py", "updater.py", "autotype.py", "winsec.py")
+PROGRAM_FILES = ("app.pyw", "vault.py", "bridge.py", "backup.py", "updater.py", "autotype.py", "winsec.py", "nouveautes.py")
 UPDATE_CHECK_MS = 3000
 UPDATE_SETTLE_SECONDS = 5
 ONLINE_CHECK_MS = 6 * 3600 * 1000
@@ -328,6 +329,8 @@ class App(tk.Tk):
         self.after(100, self._bridge_tick)
 
         self._pending_target = None
+        self.whats_new_on_unlock = False  # mis à True au lancement réel (pas dans les tests)
+        self._just_created = False
         self.hotkey = autotype.HotkeyListener()
         if not self.hotkey.start():
             self.hotkey = None  # raccourci pris par une autre appli : le reste fonctionne
@@ -476,6 +479,7 @@ class App(tk.Tk):
             pw2.set("")
             if creating:
                 def done(recovery):
+                    self._just_created = True
                     self.show_main()
                     self.show_recovery_key(recovery, first=True)
                 self._attempt(btn, msg, lambda: self.vault.create(password), done, "Création…")
@@ -682,6 +686,8 @@ class App(tk.Tk):
         menu.add_command(label="Verrouillage et Windows Hello…", command=self.lock_dialog)
         if updater.enabled():
             menu.add_command(label="Mises à jour…", command=self.update_dialog)
+        menu.add_separator()
+        menu.add_command(label="Nouveautés…", command=self.whats_new_dialog)
         settings["menu"] = menu
         settings.pack(side="right", padx=6)
         ttk.Button(top, text="🎲  Générateur", style="Ghost.TButton", command=self.open_generator).pack(side="right")
@@ -746,6 +752,7 @@ class App(tk.Tk):
         self._auto_backup()
         self.refresh_list()
         self.show_details()
+        self.after(500, self._maybe_whats_new)
         pending, self._pending_target = self._pending_target, None
         if pending and time.time() - pending[1] < 120:  # Ctrl+Alt+L appuyé pendant que le coffre était verrouillé
             self.after(300, lambda: self._autotype_request(pending[0]))
@@ -1672,6 +1679,76 @@ class App(tk.Tk):
             self.set_status(f"« {entry['site']} » associé à {exe} ({autotype.HOTKEY_LABEL})." if linked
                             else f"« {entry['site']} » n'est plus associé à {exe}.")
 
+    # ---------- nouveautés après une mise à jour ----------
+    def _maybe_whats_new(self):
+        if not self.whats_new_on_unlock:
+            return
+        self.whats_new_on_unlock = False  # une fois par lancement
+        seen = self.settings.get("notes_seen")
+        if self._just_created:  # tout neuf : rien à annoncer
+            self._mark_notes_seen()
+            return
+        if seen is None:
+            seen = nouveautes.LATEST - 1  # première fois avec cette fenêtre : seulement la dernière nouveauté
+        notes = nouveautes.since(seen)
+        if notes:
+            self.whats_new_dialog(notes, first=True)
+
+    def _mark_notes_seen(self):
+        self.settings["notes_seen"] = nouveautes.LATEST
+        backup.save_settings(self.settings)
+
+    def whats_new_dialog(self, notes=None, first=False):
+        d = self._dialog("Quoi de neuf ?")
+        f = tk.Frame(d, bg=PANEL, padx=26, pady=22)
+        f.pack(fill="both", expand=True)
+        tk.Label(f, text="🎉", bg=PANEL, font=("Segoe UI Emoji", 26)).pack(anchor="w")
+        tk.Label(f, text="Quoi de neuf dans CoffreFort" if first else "Toutes les nouveautés", bg=PANEL, fg=FG,
+                 font=("Segoe UI Semibold", 17)).pack(anchor="w", pady=(2, 2))
+        version = updater.current_version()
+        tk.Label(f, text=(f"Tu es maintenant en version {version}." if version and first else
+                          "Ce qui a changé, version après version."), bg=PANEL, fg=MUTED,
+                 font=("Segoe UI", 10)).pack(anchor="w", pady=(0, 14))
+        body = tk.Text(f, bg=PANEL, fg=FG, relief="flat", wrap="word", width=62, height=18 if first else 22,
+                       font=("Segoe UI", 10), highlightthickness=0, cursor="arrow", padx=0, pady=0,
+                       spacing1=2, spacing3=2)
+        body.tag_configure("title", font=("Segoe UI Semibold", 12), foreground=FG, spacing1=10, spacing3=4)
+        body.tag_configure("tag", font=("Segoe UI Semibold", 9), foreground=ACCENT)
+        body.tag_configure("item", lmargin1=6, lmargin2=24)
+        for number, title, items in (notes or nouveautes.NOTES):
+            body.insert("end", f"VERSION {number}\n", "tag")
+            body.insert("end", f"{title}\n", "title")
+            for it in items:
+                body.insert("end", f"•  {it}\n", "item")
+            body.insert("end", "\n")
+        body.config(state="disabled")
+        if not first:  # tout l'historique : barre de défilement
+            sb = ttk.Scrollbar(f, orient="vertical", command=body.yview, style="Dark.Vertical.TScrollbar")
+            body.configure(yscrollcommand=sb.set)
+            sb.pack(side="right", fill="y")
+        body.pack(fill="both", expand=True)
+
+        def close(_=None):
+            self._mark_notes_seen()
+            d.destroy()
+        btns = tk.Frame(d, bg=PANEL, padx=26, pady=16)
+        btns.pack(fill="x")
+        if first:
+            ttk.Button(btns, text="Voir toutes les nouveautés", style="Ghost.TButton",
+                       command=lambda: (close(), self.whats_new_dialog())).pack(side="left")
+        ttk.Button(btns, text="Super !" if first else "Fermer", style="Accent.TButton", command=close).pack(side="right")
+        d.protocol("WM_DELETE_WINDOW", close)
+        d.bind("<Return>", close)
+        d.bind("<Escape>", close)
+        if first:
+            # Ajuste la hauteur aux lignes réellement affichées (les longues phrases passent à la ligne).
+            d.update()
+            lines = (body.count("1.0", "end", "displaylines") or (0,))[0]
+            body.config(height=max(4, lines))
+        d.update_idletasks()
+        d.geometry(f"+{self.winfo_rootx() + (self.winfo_width() - d.winfo_width()) // 2}"
+                   f"+{self.winfo_rooty() + max(40, (self.winfo_height() - d.winfo_height()) // 3)}")
+
     # ---------- mises à jour ----------
     def _update_tick(self):
         fp = program_fingerprint()
@@ -2132,4 +2209,6 @@ if __name__ == "__main__":
         ctypes.windll.shcore.SetProcessDpiAwareness(1)  # texte net sur écrans HiDPI
     except Exception:  # noqa: BLE001
         pass
-    App().mainloop()
+    app = App()
+    app.whats_new_on_unlock = True
+    app.mainloop()
