@@ -1,0 +1,73 @@
+:root {
+  --bg: #1e1f24;
+  --panel: #2a2c33;
+  --line: #3a3c44;
+  --fg: #e8e8ea;
+  --muted: #9a9ca5;
+  --accent: #4f8cff;
+  --code: #ffd166;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  width: 340px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px "Segoe UI", system-ui, sans-serif;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 14px;
+  border-bottom: 1px solid var(--line);
+}
+header img { width: 18px; height: 18px; }
+main { padding: 12px 14px 14px; }
+h2 { margin: 4px 0 6px; font-size: 15px; }
+p { margin: 6px 0; line-height: 1.4; }
+.muted { color: var(--muted); font-size: 12px; }
+.state { text-align: center; padding: 6px 0; }
+.code { font: bold 26px Consolas, monospace; color: var(--code); margin: 10px 0; letter-spacing: 2px; }
+.host { font-weight: 600; font-size: 14px; margin-bottom: 8px; }
+.warn { color: #f0ad4e; font-size: 12px; margin-bottom: 8px; }
+.list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+button {
+  font: inherit;
+  color: var(--fg);
+  background: var(--line);
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+button:hover { background: #4a4c55; }
+button:disabled { opacity: .5; cursor: default; }
+button.accent { background: var(--accent); color: #fff; }
+button.accent:hover { background: #3b78ee; }
+.entry {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  background: var(--panel);
+  padding: 9px 12px;
+}
+.entry:hover { background: #343640; outline: 1px solid var(--accent); }
+.entry .site { font-weight: 600; }
+.entry .user { color: var(--muted); font-size: 12px; }
+details { background: var(--panel); border-radius: 6px; padding: 8px 10px; }
+summary { cursor: pointer; color: var(--accent); }
+input, select {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 6px 8px;
+}
+input { width: 100%; margin: 8px 0 6px; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#status { margin-top: 8px; }

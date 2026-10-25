@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "CoffreFort",
+  "version": "1.1.0",
+  "description": "Remplit tes identifiants depuis CoffreFort, ton gestionnaire de mots de passe local.",
+  "permissions": [
+    "nativeMessaging",
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "CoffreFort",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "commands": {
+    "fill-login": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L"
+      },
+      "description": "Remplir l'identifiant du site"
+    }
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApJuI9cc1mko4ZcE/4LWBawUMmb54kBiry7HBhhMwWVIkIN5e5GsFVCrM+8W1b2/IybmsHf/vW1e8DuTmnAcFQg8dHoLD8YxeFKKzqu7vRsfcpYApTO/QbgCmQhTgQUbPqbxvOspVTidqKT6emKIBxRKgfk1zCXJ6kIw+8H78NysuLK8O2cRiV3Ve8313ue4DTVj/aQZNQjnKx7TR43btGLuVCLGxkrkBmDnN7fdnlgBN+kDWyX8+aQ4au/5FaUZIoCK6d3uJGYbQOqiVJipafyzhs0Z/yS+kj8p0vTk8/bVLVNu6yO3NiZ9oVZgLn4oz/mdEj/hn7uu2uzBUaQ2y2wIDAQAB"
+}

@@ -1,0 +1,96 @@
+# CoffreFort
+
+Gestionnaire de mots de passe local, 100 % hors ligne.
+
+## Lancer
+Double-clic sur `Lancer CoffreFort.bat`.
+
+## Sécurité
+- Les données sont chiffrées en **AES-256-GCM** avec une clé aléatoire, enfermée dans deux « serrures » :
+  le **mot de passe maître** et la **clé de secours**. L'une ou l'autre suffit.
+- Chaque serrure est protégée par **Argon2id** (256 Mio, 10 passes) : force brute très coûteuse.
+- Toute altération du fichier est détectée. Écriture atomique, copie `.bak`.
+- Copie dans le presse-papiers exclue de l'historique Windows (Win+V) et du cloud, effacée après 20 s.
+- Verrouillage auto après 5 min d'inactivité ; délai croissant après 3 mauvais essais.
+- Aucune connexion réseau.
+
+## Fichier du coffre
+`%LOCALAPPDATA%\CoffreFort\coffre.vault` (+ `coffre.vault.bak`)
+
+**Sauvegarde** : copie ce fichier sur une clé USB / un autre disque de temps en temps.
+Il est chiffré, donc sans danger tant que le mot de passe maître est solide.
+
+## Mot de passe maître oublié
+À la création, CoffreFort affiche une **clé de secours** (`XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`).
+Recopie-la sur papier et range-la en lieu sûr, hors du PC.
+
+En cas d'oubli : écran de connexion → « Mot de passe oublié ? » → saisis la clé → choisis un nouveau mot de passe maître.
+
+Bouton **🛟 Clé de secours** : génère une nouvelle clé (l'ancienne cesse de fonctionner), si tu l'as perdue ou si quelqu'un l'a vue.
+
+**Mot de passe maître ET clé de secours perdus = coffre irrécupérable.** Aucune porte dérobée.
+
+## Dépendances
+`python -m pip install --user cryptography argon2-cffi`
+
+## Extension navigateur (Brave, Opera GX, Chrome, Edge)
+Remplit tes identifiants en un clic, directement depuis CoffreFort.
+
+**Installation (une fois)**
+1. Double-clic sur `Installer extension.bat` (déjà fait sur ce PC).
+2. Ouvre `brave://extensions` (ou `opera://extensions`, `chrome://extensions`), active le **Mode développeur**.
+3. **Charger l'extension non empaquetée** → choisis le dossier `CoffreFort\extension`.
+4. Épingle l'icône, ouvre-la → **Associer** → vérifie que le même code s'affiche dans CoffreFort → **Associer**.
+
+**Utilisation**
+- Sur une page de connexion : clic sur l'icône → clic sur le compte → c'est rempli.
+- Raccourci **Ctrl+Maj+L** : remplit directement s'il n'y a qu'un compte pour le site
+  (modifiable dans `brave://extensions/shortcuts`).
+- Inscription : « ＋ Nouveau compte sur ce site » → mot de passe fort généré, enregistré et rempli.
+- CoffreFort doit être ouvert et déverrouillé (l'extension peut le lancer).
+
+**Pour qu'un compte soit proposé**, renseigne le champ **Adresse** de l'entrée (ex. `accounts.google.com`).
+Il n'est proposé que sur ce domaine et ses sous-domaines : un faux site (`google.com.arnaque.ru`) n'obtient rien.
+
+**Sécurité** : l'extension ne stocke aucun mot de passe et ne peut pas lister ton coffre. Elle demande
+un seul identifiant, pour le site de l'onglet, à CoffreFort, qui vérifie l'association (stockée dans le coffre chiffré).
+Rien ne se remplit tout seul : toujours sur ton clic. Révocation : ⚙ Réglages → Extensions navigateur.
+Désinstaller le lien : `python install_extension.py --uninstall`.
+
+## Sauvegarde automatique dans le cloud (MEGA)
+À chaque modification (et à chaque déverrouillage), CoffreFort copie le coffre **déjà chiffré** dans
+`Documents\MEGA\CoffreFort-Sauvegarde` (réglable : ⚙ Réglages → Sauvegarde automatique) :
+- `coffre.vault` : dernière version ;
+- `versions\` : une copie par jour, 30 jours ;
+- `CoffreFort-programme.zip` : le programme, pour tout réinstaller ;
+- `RESTAURER.txt` : la marche à suivre.
+
+MEGA ne voit qu'un fichier chiffré : sans mot de passe maître ni clé de secours, il est illisible.
+**Vérifie dans MEGA que `Documents\MEGA` est bien un dossier synchronisé.**
+
+Sur un nouveau PC : voir `RESTAURER.txt` (écran de création → « Restaurer une sauvegarde… »).
+
+## Mises à jour
+- **Appli** : si ses fichiers sont mis à jour pendant qu'elle tourne, un bandeau bleu propose
+  « Redémarrer maintenant ». Si le coffre est verrouillé et que tu n'es pas au clavier, elle redémarre seule.
+- **Extension** : à l'ouverture, elle compare sa version à celle du dossier et se recharge d'elle-même
+  (rouvre-la ensuite). Si ça ne suffit pas, elle affiche un bouton vers la page des extensions (↻).
+
+## Partager CoffreFort avec un ami (mise à jour automatique)
+
+Chaque personne a **son propre coffre**, chiffré sur son PC. Seul le programme est partagé, via un dépôt GitHub public.
+Il ne contient jamais ton coffre, tes réglages ni ta clé de signature (liste blanche dans `publier.py`).
+
+**Toi, une seule fois :**
+1. Crée un compte sur https://github.com, puis un dépôt **Public**, vide (sans README), nommé par exemple `CoffreFort`.
+2. Double-clique sur **Publier mise a jour.bat** et colle l'adresse du dépôt. Connecte-toi à GitHub quand la fenêtre s'ouvre.
+3. Envoie à ton ami le lien du dépôt : la page explique comment installer (Download ZIP → **Installer CoffreFort.bat**).
+
+**Ensuite, à chaque nouvelle version :** relance **Publier mise a jour.bat**. Le CoffreFort de ton ami l'installe
+au lancement suivant, ou dans les 6 heures s'il est déjà ouvert (bandeau de redémarrage).
+
+**Sécurité des mises à jour :** chaque version est signée avec une clé créée sur ton PC
+(`%LOCALAPPDATA%\CoffreFort\publication\cle_signature.pem`, copiée dans ton dossier de sauvegarde MEGA).
+Sa copie refuse toute version non signée, modifiée, plus ancienne ou qui changerait la clé, même si ton compte GitHub
+était piraté. **Garde cette clé secrète et ne la perds pas** : sans elle, plus aucune mise à jour ne serait acceptée.
+Ton propre CoffreFort (ce dossier) ne se connecte jamais à Internet : seules les copies installées le font.
