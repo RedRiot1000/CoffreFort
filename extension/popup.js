@@ -33,7 +33,9 @@ async function init() {
   }
   if (st.error) return message("Erreur", esc(st.message || st.error));
   const installed = chrome.runtime.getManifest().version;
-  if (st.extension_version && st.extension_version !== installed) return updateExtension(st.extension_version, installed);
+  if (st.extension_version && st.extension_version !== installed) {
+    return updateExtension(st.extension_version, installed, st.extension_dir);
+  }
   if (!st.unlocked) {
     request("focus");
     return message("Coffre verrouillé",
@@ -47,7 +49,7 @@ async function init() {
 // Une extension chargée en mode développeur ne se met pas à jour seule :
 // runtime.reload() relit les fichiers du dossier. Une seule tentative par version,
 // pour ne pas boucler si le navigateur a chargé un autre dossier.
-async function updateExtension(expected, installed) {
+async function updateExtension(expected, installed, dir) {
   const { reloadedFor } = await chrome.storage.local.get("reloadedFor");
   if (reloadedFor !== expected) {
     await chrome.storage.local.set({ reloadedFor: expected });
@@ -55,10 +57,23 @@ async function updateExtension(expected, installed) {
     setTimeout(() => chrome.runtime.reload(), 900);
     return;
   }
-  message("Mise à jour de l'extension",
-    `La version ${esc(expected)} est disponible (installée : ${esc(installed)}). Sur la page des extensions, clique sur ↻ sous CoffreFort.`,
-    "Ouvrir la page des extensions",
-    () => chrome.tabs.create({ url: "chrome://extensions/?id=" + chrome.runtime.id }));
+  // Le rechargement n'a rien changé : le navigateur lit l'extension dans un autre dossier
+  // (souvent celui du zip téléchargé), que les mises à jour ne touchent pas.
+  render(`<div class="state">
+    <h2>Extension chargée depuis le mauvais dossier</h2>
+    <p>Ton navigateur utilise une ancienne copie (version ${esc(installed)}) au lieu de celle que CoffreFort met à jour (${esc(expected)}).</p>
+    <p>Sur la page des extensions : <b>Supprimer</b> CoffreFort, puis <b>Charger l'extension non empaquetée</b> et choisis ce dossier :</p>
+    ${dir ? `<div class="code" style="font-size:12px;word-break:break-all">${esc(dir)}</div>
+    <button id="copy">Copier le chemin</button>` : ""}
+    <button id="act" class="accent">Ouvrir la page des extensions</button>
+    <p class="muted">À faire une seule fois : ensuite elle se mettra à jour toute seule.</p></div>`);
+  document.getElementById("act").onclick = () => chrome.tabs.create({ url: "chrome://extensions/?id=" + chrome.runtime.id });
+  if (dir) {
+    document.getElementById("copy").onclick = async () => {
+      await navigator.clipboard.writeText(dir);
+      document.getElementById("copy").textContent = "✔ Copié";
+    };
+  }
 }
 
 async function launch() {

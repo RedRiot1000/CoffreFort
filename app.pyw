@@ -1230,7 +1230,8 @@ class App(tk.Tk):
         if kind == "status":
             return {"ok": True, "unlocked": self.vault.unlocked,
                     "paired": self.vault.unlocked and self._is_paired(req.get("token")),
-                    "extension_version": self._expected_extension_version()}
+                    "extension_version": self._expected_extension_version(),
+                    "extension_dir": os.path.join(HERE, "extension")}
         if not self.vault.unlocked:
             self._bring_to_front()
             return {"error": "locked"}

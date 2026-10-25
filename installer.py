@@ -68,6 +68,9 @@ def main():
     print("Raccourcis créés (Bureau et menu Démarrer).\n")
 
     subprocess.run([sys.executable, os.path.join(DEST, "install_extension.py")], check=True)
+    print("\n  ⚠ Choisis bien CE dossier-là, pas celui du zip téléchargé : sinon l'extension")
+    print("    ne pourra pas se mettre à jour. Le dossier s'ouvre dans l'Explorateur.")
+    os.startfile(os.path.join(DEST, "extension"))
 
     print("\nInstallation terminée. CoffreFort se met à jour tout seul à chaque lancement.")
     subprocess.Popen([pythonw, os.path.join(DEST, "app.pyw")], cwd=DEST)
