@@ -94,3 +94,19 @@ au lancement suivant, ou dans les 6 heures s'il est déjà ouvert (bandeau de re
 Sa copie refuse toute version non signée, modifiée, plus ancienne ou qui changerait la clé, même si ton compte GitHub
 était piraté. **Garde cette clé secrète et ne la perds pas** : sans elle, plus aucune mise à jour ne serait acceptée.
 Ton propre CoffreFort (ce dossier) ne se connecte jamais à Internet : seules les copies installées le font.
+
+## Remplir les applis Windows (Steam, Battle.net, Epic, Riot…) — Ctrl+Alt+L
+
+Comme l'extension, mais pour les programmes installés :
+1. Ouvre la fenêtre de connexion de l'appli et clique dans le champ **identifiant**.
+2. Appuie sur **Ctrl+Alt+L** (CoffreFort doit être ouvert et déverrouillé).
+3. La première fois, une petite fenêtre te demande quel compte utiliser. Laisse « Toujours utiliser ce compte pour … » coché :
+   les fois suivantes, CoffreFort remplit directement, sans rien demander.
+
+CoffreFort tape l'identifiant (ou l'e-mail), Tab, puis le mot de passe, sans valider : tu appuies toi-même sur Entrée.
+« Mot de passe seul » sert quand l'identifiant est déjà rempli.
+
+Sécurité : la saisie ne vise que la fenêtre qui était active au moment du raccourci, et s'arrête net si une autre
+fenêtre passe devant. Les applis associées sont listées dans chaque fiche (« Applis Windows ») et modifiables.
+Une appli lancée **en administrateur** refuse la saisie venant d'un programme normal : CoffreFort te le signale.
+Si le coffre est verrouillé, CoffreFort s'ouvre ; une fois déverrouillé, la fenêtre de choix apparaît.

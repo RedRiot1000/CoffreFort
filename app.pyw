@@ -16,6 +16,7 @@ from tkinter import filedialog, messagebox, ttk
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import backup  # noqa: E402
+import autotype  # noqa: E402
 import bridge  # noqa: E402
 import updater  # noqa: E402
 from vault import Vault, VaultError, WrongPassword, estimate_entropy, generate_password, strength_label  # noqa: E402
@@ -24,7 +25,7 @@ VAULT_PATH = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")
 AUTO_LOCK_SECONDS = 5 * 60
 CLIPBOARD_CLEAR_SECONDS = 20
 MIN_MASTER_LENGTH = 12
-PROGRAM_FILES = ("app.pyw", "vault.py", "bridge.py", "backup.py", "updater.py")
+PROGRAM_FILES = ("app.pyw", "vault.py", "bridge.py", "backup.py", "updater.py", "autotype.py")
 UPDATE_CHECK_MS = 3000
 UPDATE_SETTLE_SECONDS = 5
 ONLINE_CHECK_MS = 6 * 3600 * 1000
@@ -279,6 +280,13 @@ class App(tk.Tk):
         except OSError:
             self.bridge = None  # extension indisponible, l'app reste utilisable
         self.after(100, self._bridge_tick)
+
+        self._pending_target = None
+        self.hotkey = autotype.HotkeyListener()
+        if not self.hotkey.start():
+            self.hotkey = None  # raccourci pris par une autre appli : le reste fonctionne
+        else:
+            self.after(100, self._autotype_tick)
 
         for seq in ("<Any-KeyPress>", "<Any-ButtonPress>", "<Motion>"):
             self.bind_all(seq, self._touch, add="+")
@@ -614,6 +622,9 @@ class App(tk.Tk):
         self._auto_backup()
         self.refresh_list()
         self.show_details()
+        pending, self._pending_target = self._pending_target, None
+        if pending and time.time() - pending[1] < 120:  # Ctrl+Alt+L appuyé pendant que le coffre était verrouillé
+            self.after(300, lambda: self._autotype_request(pending[0]))
 
     def refresh_list(self, select_id=None):
         self.tree.delete(*self.tree.get_children())
@@ -671,6 +682,8 @@ class App(tk.Tk):
         field("Identifiant", e["username"] or "—", "username" if e["username"] else None)
         if e.get("email"):
             field("E-mail", e["email"], "email")
+        if e.get("apps"):
+            field(f"Applis Windows ({autotype.HOTKEY_LABEL})", ", ".join(e["apps"]))
         field("Mot de passe", e["password"], "password", secret=True)
         bits = estimate_entropy(e["password"])
         text, _ = strength_label(bits)
@@ -791,6 +804,9 @@ class App(tk.Tk):
 
         label("Adresse (URL)")
         ttk.Entry(f, textvariable=vars_["url"]).pack(fill="x")
+        label(f"Applis Windows, remplies avec {autotype.HOTKEY_LABEL} (ex. steamwebhelper.exe)")
+        apps_var = tk.StringVar(value=", ".join((entry or {}).get("apps", [])))
+        ttk.Entry(f, textvariable=apps_var).pack(fill="x")
         label("Notes")
         notes = tk.Text(f, height=4, width=48, bg=BG, fg=FG, insertbackground=FG, relief="flat",
                         font=("Segoe UI", 10), wrap="word")
@@ -801,6 +817,7 @@ class App(tk.Tk):
             data = {k: v.get().strip() for k, v in vars_.items()}
             data["password"] = vars_["password"].get()  # pas de strip sur un mot de passe
             data["notes"] = notes.get("1.0", "end").strip()
+            data["apps"] = [a.strip().lower() for a in apps_var.get().replace(";", ",").split(",") if a.strip()]
             if not data["site"] or not data["password"]:
                 messagebox.showwarning("Champs manquants", "Le site et le mot de passe sont obligatoires.", parent=d)
                 return
@@ -858,6 +875,137 @@ class App(tk.Tk):
                 messagebox.showinfo("OK", "Mot de passe maître changé.")
         ttk.Button(f, text="Changer", style="Accent.TButton", command=go).pack(anchor="e", pady=(10, 0))
 
+    # ---------- saisie automatique dans les applis Windows ----------
+    def _autotype_tick(self):
+        try:
+            while True:
+                self._autotype_request(self.hotkey.events.get_nowait())
+        except queue.Empty:
+            pass
+        self.after(100, self._autotype_tick)
+
+    def _apps_of(self, e):
+        return [a.lower() for a in e.get("apps", [])]
+
+    def _autotype_request(self, target):
+        if target["pid"] == os.getpid() or not target["exe"]:
+            return  # pas dans CoffreFort lui-même
+        if not self.vault.unlocked:
+            self._pending_target = (target, time.time())
+            self._bring_to_front()
+            return
+        self.last_activity = time.time()
+        matches = [e for e in self.vault.entries if target["exe"] in self._apps_of(e)]
+        if len(matches) == 1:
+            self._autotype(target, matches[0])
+        else:
+            self._autotype_picker(target, matches)
+
+    def _autotype(self, target, entry, password_only=False):
+        steps = [entry["password"]]
+        login = entry["username"] or entry.get("email", "")
+        if login and not password_only:
+            steps = [login, "\t", entry["password"]]
+        result = autotype.type_into(target["hwnd"], steps)
+        messages = {
+            "ok": f"« {entry['site']} » rempli dans {target['exe']}.",
+            "focus_lost": "Saisie interrompue : une autre fenêtre est passée au premier plan.",
+            "blocked": f"Windows bloque la saisie dans {target['exe']} (appli lancée en administrateur ?).",
+            "modifiers": "Saisie annulée : relâche Ctrl et Alt puis recommence.",
+            "no_window": "La fenêtre de l'appli a été fermée.",
+        }
+        self.set_status(messages.get(result, result))
+        if result != "ok":
+            self._bring_to_front()
+            messagebox.showwarning("Remplissage", messages.get(result, result))
+
+    def _autotype_picker(self, target, matches):
+        if getattr(self, "_picker", None) is not None and self._picker.winfo_exists():
+            self._picker.destroy()
+        d = tk.Toplevel(self)
+        self._picker = d
+        self.dialogs.append(d)
+        d.bind("<Destroy>", lambda ev: ev.widget is d and d in self.dialogs and self.dialogs.remove(d))
+        d.title("CoffreFort — remplir une appli")
+        d.configure(bg=PANEL)
+        d.resizable(False, False)
+        d.attributes("-topmost", True)
+        f = ttk.Frame(d, style="Panel.TFrame", padding=16)
+        f.pack(fill="both", expand=True)
+        name = target["title"] or target["exe"]
+        ttk.Label(f, text=f"Remplir dans « {name} »", style="Panel.TLabel",
+                  font=("Segoe UI Semibold", 13), wraplength=420).pack(anchor="w")
+        ttk.Label(f, text=f"Programme : {target['exe']}", style="Muted.TLabel").pack(anchor="w", pady=(0, 8))
+        query = tk.StringVar()
+        search = ttk.Entry(f, textvariable=query, width=50)
+        search.pack(fill="x")
+        lst = tk.Listbox(f, height=9, bg=BG, fg=FG, selectbackground=ACCENT, relief="flat", activestyle="none",
+                         font=("Segoe UI", 10), highlightthickness=0)
+        lst.pack(fill="both", expand=True, pady=6)
+        remember = tk.BooleanVar(value=not matches)
+        ttk.Checkbutton(f, text=f"Toujours utiliser ce compte pour {target['exe']}", variable=remember).pack(anchor="w")
+        ttk.Label(f, text="Clique d'abord dans le champ identifiant de l'appli. Entrée = remplir.",
+                  style="Muted.TLabel").pack(anchor="w", pady=(4, 8))
+        shown = []
+
+        def refresh(*_):
+            ids = {e["id"] for e in matches}
+            items = matches + [e for e in self.vault.search(query.get()) if e["id"] not in ids]
+            if query.get().strip():
+                items = [e for e in items if e in self.vault.search(query.get())]
+            shown[:] = items
+            lst.delete(0, "end")
+            for e in items:
+                login = e["username"] or e.get("email", "")
+                lst.insert("end", ("★ " if e["id"] in ids else "   ") + e["site"] + (f"  —  {login}" if login else ""))
+            if items:
+                lst.selection_set(0)
+        query.trace_add("write", refresh)
+        refresh()
+
+        def go(password_only=False):
+            sel = lst.curselection()
+            if not sel:
+                return
+            entry = shown[sel[0]]
+            keep = remember.get() and target["exe"] not in self._apps_of(entry)
+            d.destroy()
+            self._autotype(target, entry, password_only)
+            if keep:  # après la frappe : l'enregistrement prend ~1 s
+                self.after(50, lambda: self._remember_app(entry, target["exe"]))
+
+        def move(delta):
+            sel = lst.curselection()
+            i = min(max((sel[0] if sel else 0) + delta, 0), lst.size() - 1)
+            lst.selection_clear(0, "end")
+            lst.selection_set(i)
+            lst.see(i)
+            return "break"
+        search.bind("<Down>", lambda _: move(1))
+        search.bind("<Up>", lambda _: move(-1))
+        d.bind("<Return>", lambda _: go())
+        d.bind("<Escape>", lambda _: d.destroy())
+        lst.bind("<Double-1>", lambda _: go())
+        btns = ttk.Frame(f, style="Panel.TFrame")
+        btns.pack(fill="x")
+        ttk.Button(btns, text="Remplir", style="Accent.TButton", command=go).pack(side="left")
+        ttk.Button(btns, text="Mot de passe seul", command=lambda: go(True)).pack(side="left", padx=6)
+        ttk.Button(btns, text="Annuler", command=d.destroy).pack(side="right")
+        d.update_idletasks()
+        x, y = self.winfo_pointerxy()
+        d.geometry(f"+{max(0, x - d.winfo_width() // 2)}+{max(0, y - 40)}")
+        d.lift()
+        d.focus_force()
+        search.focus_set()
+
+    def _remember_app(self, entry, exe):
+        apps = entry.get("apps", []) + [exe]
+        saved = self._busy(lambda: self.vault.update(entry["id"], apps=apps))
+        if saved and hasattr(self, "tree") and self.tree.winfo_exists():
+            self.refresh_list(select_id=entry["id"])
+            self.show_details()
+            self.set_status(f"« {entry['site']} » sera rempli directement dans {exe} ({autotype.HOTKEY_LABEL}).")
+
     # ---------- mises à jour ----------
     def _update_tick(self):
         fp = program_fingerprint()
@@ -890,6 +1038,8 @@ class App(tk.Tk):
             return False
         if self.bridge:
             self.bridge.close()
+        if self.hotkey:
+            self.hotkey.stop()
         self.clip.clear_if_ours()
         self.vault.lock()
         flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
@@ -1219,6 +1369,8 @@ class App(tk.Tk):
     def _quit(self):
         if self.bridge:
             self.bridge.close()
+        if self.hotkey:
+            self.hotkey.stop()
         self.clip.clear_if_ours()
         self.vault.lock()
         self.destroy()

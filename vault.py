@@ -237,11 +237,12 @@ class Vault:
         return recovery
 
     # ---------- entrées ----------
-    def add(self, site: str, username: str, password: str, url: str = "", notes: str = "", email: str = "") -> dict:
+    def add(self, site: str, username: str, password: str, url: str = "", notes: str = "", email: str = "",
+            apps: list | None = None) -> dict:
         now = time.time()
         entry = {
             "id": uuid.uuid4().hex, "site": site, "username": username, "email": email, "password": password,
-            "url": url, "notes": notes, "created": now, "modified": now,
+            "url": url, "notes": notes, "apps": list(apps or []), "created": now, "modified": now,
         }
         self.entries.append(entry)
         self.save()

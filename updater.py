@@ -16,7 +16,6 @@ import json
 import os
 import re
 import shutil
-import time
 import urllib.request
 import zipfile
 
@@ -59,8 +58,24 @@ def current_version():
     return cfg["version"] if cfg else None
 
 
-def _url(cfg, path):
-    return f"https://raw.githubusercontent.com/{cfg['repo']}/{cfg['branch']}/{path}"
+def _ref(cfg):
+    """Dernier commit publié : tous les fichiers sont lus dans ce même état du dépôt.
+    (Par la branche, le cache de GitHub peut servir quelques minutes un manifeste neuf
+    avec une ancienne signature.)"""
+    try:
+        req = urllib.request.Request(f"https://api.github.com/repos/{cfg['repo']}/commits/{cfg['branch']}",
+                                     headers={"User-Agent": "CoffreFort-updater", "Accept": "application/vnd.github.sha"})
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            sha = r.read(100).decode("ascii", "replace").strip()
+        if re.fullmatch(r"[0-9a-f]{40}", sha):
+            return sha
+    except Exception:  # noqa: BLE001 - API indisponible ou limite atteinte : on lit la branche
+        pass
+    return cfg["branch"]
+
+
+def _url(cfg, path, ref=None):
+    return f"https://raw.githubusercontent.com/{cfg['repo']}/{ref or cfg['branch']}/{path}"
 
 
 def _get(url, limit):
@@ -81,8 +96,9 @@ def _check_path(name):
 
 def check(cfg):
     """Renvoie le manifeste signé d'une version plus récente, ou None."""
-    data = _get(_url(cfg, "release/manifest.json") + f"?t={int(time.time())}", 64 * 1024)
-    sig = _get(_url(cfg, "release/manifest.sig") + f"?t={int(time.time())}", 1024)
+    ref = _ref(cfg)
+    data = _get(_url(cfg, "release/manifest.json", ref), 64 * 1024)
+    sig = _get(_url(cfg, "release/manifest.sig", ref), 1024)
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(cfg["public_key"])).verify(
             bytes.fromhex(sig.decode("ascii").strip()), data)
@@ -95,11 +111,12 @@ def check(cfg):
         return None
     if not re.fullmatch(r"release/coffrefort-\d+\.zip", str(m.get("zip", ""))):
         raise UpdateError("manifeste inattendu")
+    m["_ref"] = ref
     return m
 
 
 def apply(cfg, m):
-    blob = _get(_url(cfg, m["zip"]), MAX_ZIP)
+    blob = _get(_url(cfg, m["zip"], m.get("_ref")), MAX_ZIP)
     if hashlib.sha256(blob).hexdigest() != m.get("sha256"):
         raise UpdateError("archive corrompue")
     shutil.rmtree(STAGING, ignore_errors=True)
