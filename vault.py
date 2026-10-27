@@ -317,6 +317,8 @@ class Vault:
     def update(self, entry_id: str, **fields):
         for e in self.entries:
             if e["id"] == entry_id:
+                if "password" in fields and fields["password"] != e.get("password"):
+                    e["pw_changed"] = time.time()  # pour la Santé du coffre (mots de passe anciens)
                 e.update(fields)
                 e["modified"] = time.time()
                 self.save()

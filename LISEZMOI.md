@@ -172,3 +172,19 @@ Ensuite :
   reconnaît plus. Seul « Dissocier ce téléphone » dans l'appli l'efface.
 - Les nouvelles versions de l'appli arrivent par le PC : un bouton « Installer » apparaît dans l'appli.
 - Une seule demande d'association est acceptée à la fois : si une deuxième fenêtre apparaissait, refuse.
+
+## Santé du coffre (barre de gauche → 🩺 Santé du coffre)
+
+Une note sur 100 et la liste des comptes à corriger, du plus urgent au moins urgent :
+- **Dans une fuite** (option) : le mot de passe figure dans une base de mots de passe piratés.
+- **Réutilisé** : le même mot de passe (ou presque, ex. « Soleil2023! » / « Soleil2024? ») sert sur
+  plusieurs comptes. Si un site se fait pirater, les autres tombent aussi.
+- **Faible** : trop court, mot très courant (« azerty », « soleil »…), nom du site dedans, etc.
+- **Ancien** : pas changé depuis plus d'un an.
+
+Chaque fiche de compte concerné affiche aussi l'alerte. « Changer » ouvre la fiche avec le générateur.
+
+**Vérification des fuites (désactivée par défaut).** Elle utilise Have I Been Pwned : seuls les 5 premiers
+caractères de l'empreinte SHA-1 du mot de passe sont envoyés, le service renvoie des centaines
+d'empreintes qui commencent pareil, et la comparaison se fait sur le PC. Ni le mot de passe ni son
+empreinte complète ne quittent le PC. Une fois activée, elle se refait au plus une fois par jour.

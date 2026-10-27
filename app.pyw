@@ -19,6 +19,7 @@ sys.path.insert(0, HERE)
 import backup  # noqa: E402
 import autotype  # noqa: E402
 import bridge  # noqa: E402
+import health  # noqa: E402
 import mobile  # noqa: E402
 import nouveautes  # noqa: E402
 import updater  # noqa: E402
@@ -30,7 +31,7 @@ AUTO_LOCK_SECONDS = 5 * 60
 HELLO_MAX_HOURS = 12
 CLIPBOARD_CLEAR_SECONDS = 20
 MIN_MASTER_LENGTH = 12
-PROGRAM_FILES = ("app.pyw", "vault.py", "bridge.py", "backup.py", "updater.py", "autotype.py", "winsec.py", "nouveautes.py", "mobile.py")
+PROGRAM_FILES = ("app.pyw", "vault.py", "bridge.py", "backup.py", "updater.py", "autotype.py", "winsec.py", "nouveautes.py", "mobile.py", "health.py")
 UPDATE_CHECK_MS = 3000
 UPDATE_SETTLE_SECONDS = 5
 ONLINE_CHECK_MS = 6 * 3600 * 1000
@@ -328,6 +329,10 @@ class App(tk.Tk):
         except OSError:
             self.bridge = None  # extension indisponible, l'app reste utilisable
         self.after(100, self._bridge_tick)
+
+        self._pwned: dict[str, int] = {}  # fuites trouvées (id du compte → nombre), si l'option est activée
+        self._pwned_at = 0.0
+        self._pwned_job = None
 
         self.mobile = None  # synchro Wi-Fi avec l'appli Android
         self._mobile_error = None
@@ -662,6 +667,8 @@ class App(tk.Tk):
         if not self._via_hello:
             self._master_at = time.time()
         self.after(1500, lambda: self.vault.unlocked and self._backup_keys())
+        if self.settings.get("hibp") and time.time() - self._pwned_at > 24 * 3600:
+            self.after(5000, lambda: self.vault.unlocked and self._check_leaks())
         self._via_hello = False
         self._clear_body()
         self.current = None
@@ -819,6 +826,20 @@ class App(tk.Tk):
 
         item("all", "🗂", "Tous les comptes", len(entries))
         item("fav", "★", "Favoris", sum(1 for e in entries if e.get("favorite")))
+        problems = len(health.analyze(entries, self._pwned)["issues"])
+        hrow = tk.Frame(sb, bg=SIDEBAR, cursor="hand2")
+        hrow.pack(fill="x", pady=1)
+        hparts = [hrow, tk.Label(hrow, text="🩺", bg=SIDEBAR, fg=MUTED, font=("Segoe UI Emoji", 10), width=2),
+                  tk.Label(hrow, text="Santé du coffre", bg=SIDEBAR, fg="#c9ccd8", anchor="w", font=("Segoe UI", 10)),
+                  tk.Label(hrow, text=str(problems) if problems else "✓", bg=SIDEBAR,
+                           fg=WARN if problems else "#3fc380", font=("Segoe UI Semibold", 9))]
+        hparts[1].pack(side="left", padx=(11, 4), pady=6)
+        hparts[2].pack(side="left", fill="x", expand=True)
+        hparts[3].pack(side="right", padx=10)
+        for w in hparts:
+            w.bind("<Button-1>", lambda _: self.health_dialog())
+            w.bind("<Enter>", lambda _: [p.config(bg=HOVER_SOFT) for p in hparts])
+            w.bind("<Leave>", lambda _: [p.config(bg=SIDEBAR) for p in hparts])
         tk.Label(sb, text="CATÉGORIES", bg=SIDEBAR, fg=MUTED, anchor="w", font=("Segoe UI Semibold", 8),
                  padx=12).pack(fill="x", pady=(16, 4))
         for c in self.vault.categories:
@@ -1134,6 +1155,15 @@ class App(tk.Tk):
                 eye.pack(side="right", padx=4)
             return c
 
+        problems = health.analyze(self.vault.entries, self._pwned)["issues"].get(e["id"])
+        if problems:
+            warn = tk.Frame(d, bg="#33281f", padx=12, pady=8, cursor="hand2")
+            warn.pack(fill="x", pady=(0, 6))
+            for kind, detail in problems:
+                lbl = tk.Label(warn, text=f"⚠  {health.LABELS[kind]} : {detail}", bg="#33281f", anchor="w", justify="left",
+                               fg="#ff8a8a" if kind == "pwned" else WARN, wraplength=320, font=("Segoe UI", 9))
+                lbl.pack(fill="x")
+                lbl.bind("<Button-1>", lambda _: self.health_dialog())
         card("Identifiant", e["username"] or "—", "username" if e["username"] else None)
         if e.get("email"):
             card("E-mail", e["email"], "email")
@@ -1146,10 +1176,6 @@ class App(tk.Tk):
             0, 0, ev.width * min(bits, 128) / 128, 4, fill=color, width=0)))
         tk.Label(pw_card, text=f"Robustesse : {text} (~{int(bits)} bits)", bg=CARD, fg=MUTED, anchor="w",
                  font=("Segoe UI", 8)).pack(fill="x")
-        reused = sum(1 for o in self.vault.entries if o["password"] == e["password"]) - 1
-        if reused > 0:
-            tk.Label(pw_card, text=f"⚠ Mot de passe réutilisé sur {reused} autre(s) compte(s)", bg=CARD, fg=WARN,
-                     anchor="w", font=("Segoe UI", 9)).pack(fill="x")
         if e["url"]:
             c = card("Adresse", e["url"])
             url = e["url"] if "://" in e["url"] else "https://" + e["url"]
@@ -2194,6 +2220,184 @@ class App(tk.Tk):
             ttk.Button(row, text="Révoquer", style="Danger.TButton", command=revoke).pack(side="right", padx=(20, 0))
         if self.bridge is None:
             ttk.Label(f, text="⚠ Le pont navigateur n'a pas pu démarrer.", style="Warn.TLabel").pack(anchor="w", pady=8)
+
+    # ---------- santé du coffre ----------
+    def _check_leaks(self, on_progress=None, on_done=None):
+        """Vérification des fuites en arrière-plan (option Have I Been Pwned)."""
+        if self._pwned_job is not None or not self.vault.unlocked:
+            return
+        entries = [{"id": e["id"], "password": e["password"]} for e in self.vault.entries]
+        state = {"done": 0, "total": 0, "result": None, "error": None}
+
+        def work():
+            try:
+                state["result"] = health.check_pwned(entries, lambda i, n: state.update(done=i, total=n))
+            except Exception as ex:  # noqa: BLE001 - hors ligne, service indisponible…
+                state["error"] = str(ex)
+        threading.Thread(target=work, daemon=True).start()
+
+        def poll():
+            if state["result"] is None and state["error"] is None:
+                if on_progress:
+                    on_progress(state["done"], state["total"])
+                self._pwned_job = self.after(200, poll)
+                return
+            self._pwned_job = None
+            if state["result"] is not None and self.vault.unlocked:
+                self._pwned, self._pwned_at = state["result"], time.time()
+                if hasattr(self, "sidebar") and self.sidebar.winfo_exists():
+                    self._render_sidebar()
+                    self.show_details()
+            if on_done:
+                on_done(state["error"])
+        self._pwned_job = self.after(200, poll)
+
+    def health_dialog(self):
+        d = self._dialog("Santé du coffre")
+        d.resizable(True, True)
+        d.geometry(f"780x640+{self.winfo_rootx() + 120}+{self.winfo_rooty() + 40}")
+        top = tk.Frame(d, bg=PANEL, padx=22, pady=16)
+        top.pack(fill="x")
+        score_l = tk.Label(top, bg=PANEL, font=("Segoe UI Semibold", 34))
+        score_l.pack(side="left")
+        tk.Label(top, text="/100", bg=PANEL, fg=MUTED, font=("Segoe UI", 12)).pack(side="left", anchor="s", pady=(0, 10))
+        summary = tk.Frame(top, bg=PANEL)
+        summary.pack(side="left", fill="x", expand=True, padx=(18, 0))
+        tk.Label(summary, text="🩺  Santé du coffre", bg=PANEL, fg=FG, anchor="w",
+                 font=("Segoe UI Semibold", 15)).pack(fill="x")
+        counts_l = tk.Label(summary, bg=PANEL, fg=MUTED, anchor="w", justify="left", font=("Segoe UI", 10))
+        counts_l.pack(fill="x", pady=(2, 0))
+
+        leak = tk.Frame(d, bg=CARD, padx=14, pady=10)
+        leak.pack(fill="x", padx=22)
+        leak_title = tk.Label(leak, bg=CARD, fg=FG, anchor="w", font=("Segoe UI Semibold", 10))
+        leak_title.pack(fill="x")
+        leak_text = tk.Label(leak, bg=CARD, fg=MUTED, anchor="w", justify="left", wraplength=700, font=("Segoe UI", 9))
+        leak_text.pack(fill="x", pady=(2, 6))
+        leak_btns = tk.Frame(leak, bg=CARD)
+        leak_btns.pack(fill="x")
+
+        outer = tk.Frame(d, bg=PANEL)
+        outer.pack(fill="both", expand=True, padx=22, pady=(12, 16))
+        canvas = tk.Canvas(outer, bg=PANEL, highlightthickness=0)
+        bar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        inner = tk.Frame(canvas, bg=PANEL)
+        win = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda _: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda ev: canvas.itemconfigure(win, width=ev.width))
+        canvas.configure(yscrollcommand=bar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        bar.pack(side="right", fill="y")
+        d.bind("<MouseWheel>", lambda ev: canvas.yview_scroll(-ev.delta // 120, "units"))
+
+        def show(e):
+            d.destroy()
+            self.filter = "all"
+            self.search_var.set("")
+            self._render_sidebar()
+            self.refresh_list(select_id=e["id"])
+            self.show_details()
+
+        def change(e):
+            self.entry_form(e)
+            form = self.dialogs[-1]
+            form.bind("<Destroy>", lambda ev: ev.widget is form and d.winfo_exists() and render(), add="+")
+
+        def render():
+            r = health.analyze(self.vault.entries, self._pwned)
+            score = r["score"]
+            score_l.config(text=str(score), fg="#3fc380" if score >= 80 else GOLD if score >= 50 else "#ff6b6b")
+            c = r["counts"]
+            parts = [f"{c['pwned']} dans une fuite" if c["pwned"] else "",
+                     f"{c['reused']} réutilisé{'s' if c['reused'] > 1 else ''}" if c["reused"] else "",
+                     f"{c['weak']} faible{'s' if c['weak'] > 1 else ''}" if c["weak"] else "",
+                     f"{c['old']} ancien{'s' if c['old'] > 1 else ''} (plus d'un an)" if c["old"] else ""]
+            counts_l.config(text=("  ·  ".join(p for p in parts if p) + f"\nsur {r['total']} comptes. Commence par le haut "
+                                  "de la liste : c'est le plus urgent.") if r["issues"] else
+                            f"Aucun problème sur tes {r['total']} comptes. Bravo !")
+            for w in inner.winfo_children():
+                w.destroy()
+            by_id = {e["id"]: e for e in self.vault.entries}
+            for kind in health.KINDS:
+                group = [(by_id[i], f) for i, f in r["issues"].items() if f[0][0] == kind and i in by_id]
+                if not group:
+                    continue
+                title = {"pwned": "🔴  Dans une fuite : à changer tout de suite",
+                         "reused": "🟠  Réutilisés : si un site se fait pirater, les autres tombent aussi",
+                         "weak": "🟡  Faibles : faciles à deviner", "old": "⚪  Anciens : pas changés depuis plus d'un an"}[kind]
+                tk.Label(inner, text=title, bg=PANEL, fg=FG, anchor="w",
+                         font=("Segoe UI Semibold", 10)).pack(fill="x", pady=(10, 4))
+                for e, found in sorted(group, key=lambda g: g[0]["site"].lower()):
+                    row = tk.Frame(inner, bg=CARD, padx=12, pady=8)
+                    row.pack(fill="x", pady=2)
+                    tk.Label(row, image=avatar_dot(self, e["site"]), bg=CARD).pack(side="left", padx=(0, 10))
+                    txt = tk.Frame(row, bg=CARD)
+                    txt.pack(side="left", fill="x", expand=True)
+                    who = e["username"] or e.get("email", "")
+                    tk.Label(txt, text=e["site"] + (f"  ·  {who}" if who else ""), bg=CARD, fg=FG, anchor="w",
+                             font=("Segoe UI Semibold", 10)).pack(fill="x")
+                    tk.Label(txt, text="\n".join(f"{health.LABELS[k]} : {why}" for k, why in found), bg=CARD,
+                             fg="#ff8a8a" if kind == "pwned" else MUTED, anchor="w", justify="left", wraplength=470,
+                             font=("Segoe UI", 9)).pack(fill="x")
+                    ttk.Button(row, text="Changer", style="Accent.TButton", command=lambda e=e: change(e)).pack(side="right")
+                    ttk.Button(row, text="Voir", style="Card.TButton", command=lambda e=e: show(e)).pack(side="right", padx=6)
+            leak_state()
+            self._render_sidebar()
+
+        def leak_state(progress=None):
+            for w in leak_btns.winfo_children():
+                w.destroy()
+            if not self.settings.get("hibp"):
+                leak_title.config(text="🔎  Vérifier si tes mots de passe ont fuité (optionnel)")
+                leak_text.config(text="CoffreFort compare tes mots de passe à Have I Been Pwned, la base publique des mots "
+                                      "de passe piratés (plusieurs centaines de millions). Seuls les 5 premiers caractères "
+                                      "d'une empreinte de chaque mot de passe sont envoyés : impossible d'en retrouver le "
+                                      "mot de passe. La comparaison finale se fait sur ton PC.")
+                ttk.Button(leak_btns, text="Activer et vérifier", style="Accent.TButton", command=enable).pack(side="left")
+                return
+            leak_title.config(text="🔎  Vérification des fuites : activée")
+            if progress is not None:
+                leak_text.config(text=progress)
+                return
+            if self._pwned_at:
+                n = len(self._pwned)
+                leak_text.config(text=time.strftime("Dernière vérification à %H:%M : ", time.localtime(self._pwned_at))
+                                 + (f"{n} mot{'s' if n > 1 else ''} de passe trouvé{'s' if n > 1 else ''} dans des fuites."
+                                    if n else "aucun mot de passe trouvé dans les fuites connues."))
+            else:
+                leak_text.config(text="Pas encore vérifié depuis l'ouverture de CoffreFort.")
+            ttk.Button(leak_btns, text="Vérifier maintenant", command=run).pack(side="left")
+            ttk.Button(leak_btns, text="Désactiver", style="Card.TButton", command=disable).pack(side="left", padx=6)
+
+        def run():
+            def progress(i, n):
+                if d.winfo_exists():
+                    leak_state(f"Vérification… {i}/{n}" if n else "Vérification…")
+
+            def done(error):
+                if not d.winfo_exists():
+                    return
+                render()
+                if error:
+                    leak_text.config(text=f"⚠ Vérification impossible (pas d'Internet ?) : {error}")
+            progress(0, 0)
+            self._check_leaks(progress, done)
+
+        def enable():
+            self.settings["hibp"] = True
+            backup.save_settings(self.settings)
+            run()
+
+        def disable():
+            self.settings["hibp"] = False
+            backup.save_settings(self.settings)
+            self._pwned, self._pwned_at = {}, 0.0
+            render()
+            self.show_details()
+
+        render()
+        if self.settings.get("hibp") and not self._pwned_at:
+            run()
 
     # ---------- téléphone Android ----------
     def _start_mobile(self):

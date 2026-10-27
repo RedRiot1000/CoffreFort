@@ -5,6 +5,13 @@
 """
 
 NOTES = [
+    (14, "Santé du coffre", [
+        "Nouveau dans la barre de gauche : 🩺 Santé du coffre. Elle repère les mots de passe faibles, "
+        "réutilisés (ou presque identiques) et ceux pas changés depuis plus d'un an, avec une note sur 100.",
+        "En option : vérifier si tes mots de passe apparaissent dans des fuites connues (Have I Been Pwned). "
+        "Ton mot de passe ne quitte jamais le PC.",
+        "Un bouton « Changer » sur chaque compte concerné.",
+    ]),
     (13, "Sécurité renforcée", [
         "Le téléphone n'accepte plus qu'une demande d'association à la fois.",
         "Appli Android 1.2 : installe-la depuis le bouton « Installer » de l'appli.",
