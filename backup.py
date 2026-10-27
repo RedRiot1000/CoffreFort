@@ -9,6 +9,7 @@ jamais rien en clair. À chaque sauvegarde du coffre :
 Les versions protègent contre un coffre abîmé qui serait synchronisé tel quel.
 """
 
+import base64
 import glob
 import hashlib
 import io
@@ -176,3 +177,61 @@ def restore_file(source: str, vault_path: str):
         raise ValueError("Un coffre existe déjà sur ce PC.")
     os.makedirs(os.path.dirname(vault_path), exist_ok=True)
     shutil.copyfile(source, vault_path)
+
+
+# ---------- clés de publication (PC de l'auteur uniquement) ----------
+PUBLICATION_DIR = os.path.join(DATA_DIR, "publication")
+PUBLICATION_FILES = ("cle_signature.pem", "android.jks", "android_mdp.txt")
+SEALED_KEYS = "cles_publication.chiffre"
+# Anciennes copies en clair, posées par les premières versions de publier.py / build_apk.py.
+OLD_PLAIN_COPIES = ("cle_signature_publication.pem", "cle_android_publication.jks", "cle_android_publication_mdp.txt")
+REAL_VAULT = os.path.join(DATA_DIR, "coffre.vault")
+
+
+def backup_publication_keys(vault, folder: str) -> bool:
+    """Copie les clés de publication dans le dossier de sauvegarde, CHIFFRÉES par la clé du coffre
+    (il faut le mot de passe maître ou la clé de secours pour les relire), et retire les anciennes
+    copies en clair. Ne fait rien hors du PC de l'auteur. Renvoie True si la copie a été réécrite."""
+    if (not folder or not os.path.isdir(folder) or not vault.unlocked
+            or os.path.normcase(os.path.abspath(vault.path)) != os.path.normcase(REAL_VAULT)):
+        return False
+    files = {}
+    for name in PUBLICATION_FILES:
+        try:
+            with open(os.path.join(PUBLICATION_DIR, name), "rb") as f:
+                files[name] = base64.b64encode(f.read()).decode("ascii")
+        except FileNotFoundError:
+            pass
+    if not files:
+        return False
+    bundle = json.dumps(files, sort_keys=True).encode("utf-8")
+    dest = os.path.join(folder, SEALED_KEYS)
+    try:
+        with open(dest, encoding="utf-8") as f:
+            changed = vault.unseal(json.load(f), "publication") != bundle
+    except Exception:  # noqa: BLE001 - absente, abîmée ou d'un autre coffre : on la refait
+        changed = True
+    if changed:
+        _atomic_write(dest, json.dumps(vault.seal(bundle, "publication")).encode("utf-8"))
+        with open(dest, encoding="utf-8") as f:
+            if vault.unseal(json.load(f), "publication") != bundle:  # relue avant d'effacer quoi que ce soit
+                raise OSError("copie chiffrée des clés illisible")
+    for old in OLD_PLAIN_COPIES:
+        try:
+            os.remove(os.path.join(folder, old))
+        except FileNotFoundError:
+            pass
+    return changed
+
+
+def restore_publication_keys(vault, source: str) -> list[str]:
+    """Remet les clés de publication depuis la copie chiffrée (après une panne du PC)."""
+    with open(source, encoding="utf-8") as f:
+        files = json.loads(vault.unseal(json.load(f), "publication"))
+    os.makedirs(PUBLICATION_DIR, exist_ok=True)
+    for name, data in files.items():
+        if name not in PUBLICATION_FILES:
+            raise ValueError(f"fichier inattendu : {name}")
+        with open(os.path.join(PUBLICATION_DIR, name), "wb") as f:
+            f.write(base64.b64decode(data))
+    return sorted(files)

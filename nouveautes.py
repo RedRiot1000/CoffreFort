@@ -5,6 +5,10 @@
 """
 
 NOTES = [
+    (13, "Sécurité renforcée", [
+        "Le téléphone n'accepte plus qu'une demande d'association à la fois.",
+        "Appli Android 1.2 : installe-la depuis le bouton « Installer » de l'appli.",
+    ]),
     (12, "Appli Android", [
         "Consulte et copie tes mots de passe sur ton téléphone Android, même sans réseau (lecture seule).",
         "Le téléphone se met à jour tout seul sur ton Wi-Fi, et s'ouvre avec ton mot de passe maître ou ton empreinte.",

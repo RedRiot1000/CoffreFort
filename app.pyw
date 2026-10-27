@@ -661,6 +661,7 @@ class App(tk.Tk):
     def show_main(self):
         if not self._via_hello:
             self._master_at = time.time()
+        self.after(1500, lambda: self.vault.unlocked and self._backup_keys())
         self._via_hello = False
         self._clear_body()
         self.current = None
@@ -1818,11 +1819,19 @@ class App(tk.Tk):
             self.settings["last_backup"] = backup.run_backup(self.vault.path, folder)
             backup.save_settings(self.settings)
             self._backup_error = None
+            self._backup_keys()
         except OSError as ex:
             self._backup_error = str(ex)
             # La création du coffre tourne dans un thread : on ne touche à l'interface que depuis le principal.
             if threading.current_thread() is threading.main_thread():
                 self.set_status(f"⚠ Sauvegarde cloud échouée : {ex}")
+
+    def _backup_keys(self):
+        """PC de l'auteur : clés de publication copiées chiffrées dans le dossier de sauvegarde."""
+        try:
+            backup.backup_publication_keys(self.vault, self.settings.get("backup_dir"))
+        except (OSError, ValueError, VaultError) as ex:
+            self._backup_error = f"clés de publication : {ex}"
 
     def _cloud_banner(self):
         clouds = backup.cloud_folders()

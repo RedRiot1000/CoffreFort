@@ -140,6 +140,7 @@ class MobileServer:
         self.pairing_until = 0.0
         self.port = None
         self._seen: dict[str, float] = {}
+        self._pair_busy = False
         self._lock = threading.Lock()
         self._tcp = self._udp = None
 
@@ -272,6 +273,23 @@ class MobileServer:
         if not self.pairing:
             yield {"error": "not_pairing"}, None
             return
+        # Une seule demande à la fois : un autre appareil du Wi-Fi ne peut pas glisser sa fenêtre
+        # de confirmation à côté de celle du vrai téléphone.
+        with self._lock:
+            if self._pair_busy:
+                busy = True
+            else:
+                busy, self._pair_busy = False, True
+        if busy:
+            yield {"error": "busy"}, None
+            return
+        try:
+            yield from self._pair_one(req, addr)
+        finally:
+            with self._lock:
+                self._pair_busy = False
+
+    def _pair_one(self, req, addr):
         try:
             phone_pub = _b64d(req["pub"])
             peer = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), phone_pub)

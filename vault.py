@@ -257,6 +257,27 @@ class Vault:
         if self.on_saved:
             self.on_saved()
 
+    # ---------- données annexes chiffrées par la clé du coffre ----------
+    def seal(self, data: bytes, label: str) -> dict:
+        """Chiffre `data` avec la clé du coffre : il faudra ouvrir ce coffre (mot de passe maître
+        ou clé de secours) pour le relire, même après un changement de mot de passe."""
+        if self._data_key is None:
+            raise VaultError("Coffre verrouillé.")
+        nonce = secrets.token_bytes(12)
+        ct = AESGCM(bytes(self._data_key)).encrypt(nonce, data, _aad({"format": "coffrefort-sealed", "label": label}))
+        return {"format": "coffrefort-sealed", "label": label, "nonce": _b64e(nonce), "ciphertext": _b64e(ct)}
+
+    def unseal(self, blob: dict, label: str) -> bytes:
+        if self._data_key is None:
+            raise VaultError("Coffre verrouillé.")
+        if blob.get("format") != "coffrefort-sealed" or blob.get("label") != label:
+            raise VaultError("Fichier non reconnu.")
+        try:
+            return AESGCM(bytes(self._data_key)).decrypt(_b64d(blob["nonce"]), _b64d(blob["ciphertext"]),
+                                                         _aad({"format": "coffrefort-sealed", "label": label}))
+        except InvalidTag:
+            raise VaultError("Ce fichier ne correspond pas à ce coffre, ou il est abîmé.")
+
     # ---------- serrures ----------
     def set_password(self, new: str):
         """Remplace le mot de passe maître (après ouverture par clé de secours)."""

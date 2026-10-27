@@ -171,3 +171,4 @@ Ensuite :
 - Si ton PC tombe en panne, le téléphone garde sa copie : elle reste lisible même si le PC ne le
   reconnaît plus. Seul « Dissocier ce téléphone » dans l'appli l'efface.
 - Les nouvelles versions de l'appli arrivent par le PC : un bouton « Installer » apparaît dans l'appli.
+- Une seule demande d'association est acceptée à la fois : si une deuxième fenêtre apparaissait, refuse.
