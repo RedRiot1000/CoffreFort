@@ -1,11 +1,11 @@
 {
   "format": "coffrefort-update",
   "repo": "RedRiot1000/CoffreFort",
-  "version": 14,
-  "zip": "release/coffrefort-14.zip",
-  "sha256": "21d1eba8572df79d8d9078fcf8b61db80f4ddedc5b9839557cb96fdc40318854",
-  "size": 94556,
-  "published": "2026-10-27T17:57:42",
+  "version": 15,
+  "zip": "release/coffrefort-15.zip",
+  "sha256": "e35468d084b5f3a337af63d19c9cfcd955042a303a6f57512b2e04f7c433ff9a",
+  "size": 113377,
+  "published": "2026-10-28T21:24:08",
   "apk": {
     "path": "mobile/CoffreFort.apk",
     "version_code": 2,

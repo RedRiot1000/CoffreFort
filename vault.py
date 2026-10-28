@@ -314,6 +314,20 @@ class Vault:
         self.save()
         return entry
 
+    def add_many(self, items: list[dict], category: str = "") -> int:
+        """Ajoute plusieurs comptes d'un coup (import) avec une seule écriture du fichier."""
+        now = time.time()
+        for it in items:
+            self.entries.append({
+                "id": uuid.uuid4().hex, "site": it["site"], "username": it.get("username", ""),
+                "email": it.get("email", ""), "password": it["password"], "url": it.get("url", ""),
+                "notes": it.get("notes", ""), "apps": [], "category": category, "favorite": False,
+                "created": now, "modified": now,
+            })
+        if items:
+            self.save()
+        return len(items)
+
     def update(self, entry_id: str, **fields):
         for e in self.entries:
             if e["id"] == entry_id:

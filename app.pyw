@@ -20,6 +20,8 @@ import backup  # noqa: E402
 import autotype  # noqa: E402
 import bridge  # noqa: E402
 import health  # noqa: E402
+import generator  # noqa: E402
+import importer  # noqa: E402
 import mobile  # noqa: E402
 import nouveautes  # noqa: E402
 import updater  # noqa: E402
@@ -31,7 +33,7 @@ AUTO_LOCK_SECONDS = 5 * 60
 HELLO_MAX_HOURS = 12
 CLIPBOARD_CLEAR_SECONDS = 20
 MIN_MASTER_LENGTH = 12
-PROGRAM_FILES = ("app.pyw", "vault.py", "bridge.py", "backup.py", "updater.py", "autotype.py", "winsec.py", "nouveautes.py", "mobile.py", "health.py")
+PROGRAM_FILES = ("app.pyw", "vault.py", "bridge.py", "backup.py", "updater.py", "autotype.py", "winsec.py", "nouveautes.py", "mobile.py", "health.py", "importer.py", "generator.py", "mots_fr.py")
 UPDATE_CHECK_MS = 3000
 UPDATE_SETTLE_SECONDS = 5
 ONLINE_CHECK_MS = 6 * 3600 * 1000
@@ -196,63 +198,205 @@ class StrengthBar(ttk.Frame):
         self.canvas.create_rectangle(0, 0, width * min(bits, 128) / 128, 6, fill=color, width=0)
         self.label.config(text=f"{text} · ~{int(bits)} bits" if password else "")
 
+    def show_bits(self, bits: float, detail: str = ""):
+        """Solidité d'un réglage du générateur (aléa réel), avec un détail en plus."""
+        text, color = strength_label(bits)
+        self.canvas.delete("all")
+        width = max(self.canvas.winfo_width(), 200)
+        self.canvas.create_rectangle(0, 0, width * min(bits, 128) / 128, 6, fill=color, width=0)
+        self.label.config(text=f"{text} · ~{int(bits)} bits d'aléa · {detail}" if bits else detail)
+
 
 class GeneratorPanel(ttk.Frame):
-    def __init__(self, parent, on_use=None, on_copy=None):
+    """Générateur personnalisable : caractères, mots français ou code PIN. Les réglages sont retenus."""
+
+    def __init__(self, parent, on_use=None, on_copy=None, app=None):
         super().__init__(parent, style="Panel.TFrame", padding=16)
-        self.on_use, self.on_copy = on_use, on_copy
-        self.length = tk.IntVar(value=24)
-        self.opts = {k: tk.BooleanVar(value=True) for k in ("lower", "upper", "digits", "symbols")}
-        self.ambig = tk.BooleanVar(value=False)
+        self.on_use, self.on_copy, self.app = on_use, on_copy, app
+        self.opt = generator.settings((app.settings if app else {}).get("generator"))
+        style = ttk.Style(self)
+        style.configure("TSpinbox", fieldbackground=CARD, background=CARD, foreground=FG, arrowcolor=MUTED,
+                        bordercolor=BORDER, padding=3)
+        style.map("TSpinbox", fieldbackground=[("readonly", CARD)], foreground=[("readonly", FG)])
+        self.vars = {}
         self.result = tk.StringVar()
 
-        out = ttk.Entry(self, textvariable=self.result, font=("Consolas", 13), width=40)
+        out = ttk.Entry(self, textvariable=self.result, font=("Consolas", 14), width=46)
         out.pack(fill="x")
         self.strength = StrengthBar(self)
         self.strength.pack(fill="x", pady=(6, 10))
 
-        row = ttk.Frame(self, style="Panel.TFrame")
-        row.pack(fill="x")
-        ttk.Label(row, text="Longueur", style="Panel.TLabel").pack(side="left")
-        self.len_label = ttk.Label(row, text="24", width=3, style="Panel.TLabel")
-        self.len_label.pack(side="right")
-        ttk.Scale(row, from_=8, to=64, variable=self.length, command=self._on_len).pack(
-            side="left", fill="x", expand=True, padx=10)
-
-        labels = {"lower": "Minuscules (a-z)", "upper": "Majuscules (A-Z)",
-                  "digits": "Chiffres (0-9)", "symbols": "Symboles (!@#…)"}
-        grid = ttk.Frame(self, style="Panel.TFrame")
-        grid.pack(fill="x", pady=8)
-        for i, (k, lbl) in enumerate(labels.items()):
-            ttk.Checkbutton(grid, text=lbl, variable=self.opts[k], command=self.generate).grid(
-                row=i // 2, column=i % 2, sticky="w", padx=(0, 20), pady=2)
-        ttk.Checkbutton(grid, text="Éviter les caractères ambigus (l, 1, O, 0…)", variable=self.ambig,
-                        command=self.generate).grid(row=2, column=0, columnspan=2, sticky="w", pady=2)
+        modes = ttk.Frame(self, style="Panel.TFrame")
+        modes.pack(fill="x", pady=(0, 8))
+        self.mode_btns = {}
+        for key, label in (("chars", "🔣  Caractères aléatoires"), ("words", "🇫🇷  Mots français"), ("pin", "🔢  Code PIN")):
+            b = ttk.Button(modes, text=label, command=lambda k=key: self._set_mode(k))
+            b.pack(side="left", padx=(0, 6))
+            self.mode_btns[key] = b
+        self.options = ttk.Frame(self, style="Panel.TFrame")
+        self.options.pack(fill="x")
 
         btns = ttk.Frame(self, style="Panel.TFrame")
-        btns.pack(fill="x", pady=(6, 0))
+        btns.pack(fill="x", pady=(10, 0))
         ttk.Button(btns, text="↻ Régénérer", command=self.generate).pack(side="left")
         if on_copy:
             ttk.Button(btns, text="Copier", command=lambda: on_copy(self.result.get())).pack(side="left", padx=6)
+        ttk.Button(btns, text="Rétablir par défaut", style="Card.TButton", command=self._reset).pack(side="left", padx=6)
         if on_use:
             ttk.Button(btns, text="Utiliser ce mot de passe", style="Accent.TButton",
                        command=lambda: on_use(self.result.get())).pack(side="right")
-        self.result.trace_add("write", lambda *_: self.strength.update_for(self.result.get()))
-        self.after(50, self.generate)
+        self._set_mode(self.opt["mode"], save=False)
 
-    def _on_len(self, _=None):
-        n = int(float(self.length.get()))
-        self.length.set(n)
-        self.len_label.config(text=str(n))
+    # ---------- réglages ----------
+    def _var(self, key):
+        default = self.opt[key]
+        if key not in self.vars:
+            cls = tk.BooleanVar if isinstance(default, bool) else tk.IntVar if isinstance(default, int) else tk.StringVar
+            self.vars[key] = cls(value=default)
+            self.vars[key].trace_add("write", lambda *_: self._changed())
+        return self.vars[key]
+
+    def _changed(self):
+        for k, v in self.vars.items():
+            try:
+                self.opt[k] = v.get()
+            except tk.TclError:  # champ numérique en cours de saisie
+                return
+        self._save()
         self.generate()
+
+    def _save(self):
+        if self.app is not None:
+            self.app.settings["generator"] = dict(self.opt)
+            backup.save_settings(self.app.settings)
+
+    def _reset(self):
+        mode = self.opt["mode"]
+        self.opt = generator.settings({"mode": mode})
+        self.vars = {}
+        self._save()
+        self._set_mode(mode)
+
+    def _set_mode(self, mode, save=True):
+        self.opt["mode"] = mode
+        if save:
+            self._save()
+        for k, b in self.mode_btns.items():
+            b.config(style="Accent.TButton" if k == mode else "TButton")
+        for w in self.options.winfo_children():
+            w.destroy()
+        self.vars = {}
+        {"chars": self._chars_ui, "words": self._words_ui, "pin": self._pin_ui}[mode]()
+        self.generate()
+
+    # ---------- petits composants ----------
+    def _scale(self, parent, label, key, lo, hi):
+        row = ttk.Frame(parent, style="Panel.TFrame")
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text=label, style="Panel.TLabel", width=18).pack(side="left")
+        var = self._var(key)
+        value = ttk.Label(row, text=str(var.get()), width=4, style="Panel.TLabel")
+        value.pack(side="right")
+
+        def moved(_=None):
+            n = int(round(float(scale.get())))
+            value.config(text=str(n))
+            if var.get() != n:
+                var.set(n)
+        scale = ttk.Scale(row, from_=lo, to=hi, command=moved)
+        scale.set(var.get())
+        scale.pack(side="left", fill="x", expand=True, padx=10)
+
+    def _spin(self, parent, key, lo, hi, width=3):
+        return ttk.Spinbox(parent, from_=lo, to=hi, width=width, textvariable=self._var(key), state="readonly")
+
+    def _combo(self, parent, key, choices, width=22):
+        var = self._var(key)
+        shown = tk.StringVar(value=choices.get(var.get(), next(iter(choices.values()))))
+        box = ttk.Combobox(parent, textvariable=shown, values=list(choices.values()), state="readonly", width=width)
+        box.bind("<<ComboboxSelected>>",
+                 lambda _: var.set(next(k for k, v in choices.items() if v == shown.get())))
+        var.trace_add("write", lambda *_: shown.set(choices.get(var.get(), shown.get())))
+        return box
+
+    def _check(self, parent, text, key):
+        return ttk.Checkbutton(parent, text=text, variable=self._var(key))
+
+    # ---------- modes ----------
+    def _chars_ui(self):
+        f = self.options
+        self._scale(f, "Longueur", "length", 4, 128)
+        grid = ttk.Frame(f, style="Panel.TFrame")
+        grid.pack(fill="x", pady=(6, 0))
+        rows = (("lower", "Minuscules  a-z", "min_lower"), ("upper", "Majuscules  A-Z", "min_upper"),
+                ("digits", "Chiffres  0-9", "min_digits"), ("symbols", "Caractères spéciaux", "min_symbols"))
+        for r, (key, label, min_key) in enumerate(rows):
+            self._check(grid, label, key).grid(row=r, column=0, sticky="w", pady=3)
+            ttk.Label(grid, text="au moins", style="Muted.TLabel").grid(row=r, column=1, padx=(14, 4))
+            self._spin(grid, min_key, 1, 20).grid(row=r, column=2)
+            if key in ("digits", "symbols"):
+                ttk.Label(grid, text="placés", style="Muted.TLabel").grid(row=r, column=3, padx=(14, 4))
+                self._combo(grid, key + "_pos", generator.POSITIONS, 20).grid(row=r, column=4, sticky="w")
+        row = ttk.Frame(f, style="Panel.TFrame")
+        row.pack(fill="x", pady=(8, 2))
+        ttk.Label(row, text="Caractères spéciaux utilisés :", style="Muted.TLabel").pack(side="left")
+        ttk.Entry(row, textvariable=self._var("symbol_set"), font=("Consolas", 10), width=30).pack(side="left", padx=6)
+        row = ttk.Frame(f, style="Panel.TFrame")
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="Ne jamais utiliser :", style="Muted.TLabel").pack(side="left")
+        ttk.Entry(row, textvariable=self._var("exclude"), font=("Consolas", 10), width=16).pack(side="left", padx=6)
+        checks = ttk.Frame(f, style="Panel.TFrame")
+        checks.pack(fill="x", pady=(4, 0))
+        self._check(checks, "Éviter les caractères ambigus (l 1 I O 0…)", "avoid_ambiguous").grid(row=0, column=0, sticky="w")
+        self._check(checks, "Commencer par une lettre", "start_letter").grid(row=0, column=1, sticky="w", padx=(16, 0))
+        self._check(checks, "Jamais deux fois le même caractère à la suite", "no_repeat").grid(row=1, column=0, sticky="w")
+
+    def _words_ui(self):
+        f = self.options
+        self._scale(f, "Nombre de mots", "words", 2, 12)
+        grid = ttk.Frame(f, style="Panel.TFrame")
+        grid.pack(fill="x", pady=(6, 0))
+        ttk.Label(grid, text="Séparateur", style="Panel.TLabel").grid(row=0, column=0, sticky="w", pady=3)
+        self._combo(grid, "separator", generator.SEPARATORS).grid(row=0, column=1, columnspan=2, sticky="w")
+        ttk.Entry(grid, textvariable=self._var("separator_custom"), width=6,
+                  font=("Consolas", 10)).grid(row=0, column=3, sticky="w", padx=6)
+        ttk.Label(grid, text="Majuscules", style="Panel.TLabel").grid(row=1, column=0, sticky="w", pady=3)
+        self._combo(grid, "case", generator.CASES).grid(row=1, column=1, columnspan=2, sticky="w")
+        for r, (label, count, pos) in enumerate((("Chiffres", "word_digits", "word_digits_pos"),
+                                                 ("Caractères spéciaux", "word_symbols", "word_symbols_pos")), start=2):
+            ttk.Label(grid, text=label, style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=3)
+            self._spin(grid, count, 0, 8).grid(row=r, column=1, sticky="w")
+            self._combo(grid, pos, generator.WORD_POSITIONS, 16).grid(row=r, column=2, columnspan=2, sticky="w", padx=6)
+        ttk.Label(grid, text="Longueur des mots", style="Panel.TLabel").grid(row=4, column=0, sticky="w", pady=3)
+        lens = ttk.Frame(grid, style="Panel.TFrame")
+        lens.grid(row=4, column=1, columnspan=3, sticky="w")
+        ttk.Label(lens, text="de", style="Muted.TLabel").pack(side="left")
+        self._spin(lens, "min_word", 3, 12).pack(side="left", padx=4)
+        ttk.Label(lens, text="à", style="Muted.TLabel").pack(side="left")
+        self._spin(lens, "max_word", 3, 12).pack(side="left", padx=4)
+        ttk.Label(lens, text="lettres", style="Muted.TLabel").pack(side="left")
+        row = ttk.Frame(f, style="Panel.TFrame")
+        row.pack(fill="x", pady=(8, 0))
+        ttk.Label(row, text="Caractères spéciaux utilisés :", style="Muted.TLabel").pack(side="left")
+        ttk.Entry(row, textvariable=self._var("symbol_set"), font=("Consolas", 10), width=30).pack(side="left", padx=6)
+        ttk.Label(f, text=f"{len(generator.WORDS)} mots français courants, sans accents (faciles à taper partout).",
+                  style="Muted.TLabel").pack(anchor="w", pady=(6, 0))
+
+    def _pin_ui(self):
+        self._scale(self.options, "Nombre de chiffres", "pin_length", 4, 12)
+        ttk.Label(self.options, text="Pour un code de carte SIM, de cadenas ou de téléphone. Trop faible pour un site web.",
+                  style="Muted.TLabel").pack(anchor="w", pady=(6, 0))
 
     def generate(self):
         try:
-            self.result.set(generate_password(
-                self.length.get(), avoid_ambiguous=self.ambig.get(), **{k: v.get() for k, v in self.opts.items()}))
+            pw = generator.generate(self.opt)
+            bits = generator.entropy(self.opt)
         except ValueError as e:
             self.result.set("")
-            self.strength.label.config(text=str(e))
+            self.strength.show_bits(0, str(e))
+            return
+        self.result.set(pw)
+        self.strength.show_bits(bits, f"{len(pw)} caractères · ~{generator.crack_time(bits)} pour le deviner")
 
 
 # ---------------------------------------------------------------- mise à jour en ligne
@@ -697,6 +841,7 @@ class App(tk.Tk):
                        relief="flat", font=("Segoe UI", 10), bd=0)
         menu.add_command(label="Mot de passe maître…", command=self.change_master)
         menu.add_command(label="Clé de secours…", command=self.regenerate_recovery)
+        menu.add_command(label="Importer depuis le navigateur…", command=self.import_dialog)
         menu.add_command(label="Extensions navigateur…", command=self.manage_extensions)
         menu.add_command(label="Téléphone Android…", command=self.mobile_dialog)
         menu.add_command(label="Sauvegarde automatique…", command=self.backup_dialog)
@@ -1061,7 +1206,15 @@ class App(tk.Tk):
         self.list_title.config(text=f"{title}   ·   {len(items)}")
         if items:
             self.empty_hint.place_forget()
+        elif not self.vault.entries:
+            self.empty_hint.config(text="Ton coffre est vide.\n\nClique sur « ＋ Ajouter », ou récupère d'un coup les mots\n"
+                                        "de passe de ton navigateur :\n\n📥  Importer depuis le navigateur…",
+                                   fg=ACCENT, cursor="hand2")
+            self.empty_hint.bind("<Button-1>", lambda _: self.import_dialog())
+            self.empty_hint.place(relx=0.5, rely=0.4, anchor="center")
         else:
+            self.empty_hint.unbind("<Button-1>")
+            self.empty_hint.config(fg=MUTED, cursor="")
             self.empty_hint.config(text="Aucun compte ici.\n\n" + (
                 "Clique sur ☆ dans la liste ou dans une fiche\npour ajouter un favori." if self.filter == "fav" else
                 "Choisis la catégorie dans la fiche d'un compte,\nou clique sur « ＋ Ajouter »."))
@@ -1254,7 +1407,7 @@ class App(tk.Tk):
 
     def open_generator(self):
         d = self._dialog("Générateur de mots de passe")
-        GeneratorPanel(d, on_copy=lambda p: self.copy_text(p)).pack(fill="both", expand=True)
+        GeneratorPanel(d, on_copy=lambda p: self.copy_text(p), app=self).pack(fill="both", expand=True)
 
     def entry_form(self, entry=None):
         d = self._dialog("Modifier l'entrée" if entry else "Nouvelle entrée")
@@ -1297,7 +1450,7 @@ class App(tk.Tk):
         bar.pack(fill="x", pady=(4, 0))
         vars_["password"].trace_add("write", lambda *_: bar.update_for(vars_["password"].get()))
         f.after(50, lambda: bar.update_for(vars_["password"].get()))
-        GeneratorPanel(gen_holder, on_use=use).pack(fill="x", pady=6)
+        GeneratorPanel(gen_holder, on_use=use, app=self).pack(fill="x", pady=6)
         if not entry:
             gen_holder.pack(fill="x", after=bar)
 
@@ -2192,6 +2345,244 @@ class App(tk.Tk):
         ttk.Button(btns, text="Associer", style="Accent.TButton", command=lambda: finish(True)).pack(side="right")
         ttk.Button(btns, text="Refuser", command=lambda: finish(False)).pack(side="right", padx=6)
         return None
+
+    def import_dialog(self):
+        d = self._dialog("Importer depuis le navigateur")
+        d.resizable(True, True)
+        d.geometry(f"820x660+{self.winfo_rootx() + 110}+{self.winfo_rooty() + 30}")
+        f = ttk.Frame(d, style="Panel.TFrame", padding=20)
+        f.pack(fill="both", expand=True)
+        ttk.Label(f, text="📥  Importer depuis le navigateur", style="Panel.TLabel",
+                  font=("Segoe UI Semibold", 15)).pack(anchor="w")
+        body = ttk.Frame(f, style="Panel.TFrame")
+        body.pack(fill="both", expand=True, pady=(8, 0))
+
+        def step1():
+            ttk.Label(body, text="1. Exporte tes mots de passe depuis ton navigateur (tape l'adresse dans la barre du "
+                                 "navigateur) :", style="Panel.TLabel", wraplength=760, justify="left").pack(anchor="w")
+            box = tk.Frame(body, bg=CARD, padx=14, pady=10)
+            box.pack(fill="x", pady=(6, 12))
+            for name, how in importer.BROWSERS:
+                row = tk.Frame(box, bg=CARD)
+                row.pack(fill="x", pady=2)
+                tk.Label(row, text=name, bg=CARD, fg=FG, width=16, anchor="w", font=("Segoe UI Semibold", 10)).pack(side="left")
+                tk.Label(row, text=how, bg=CARD, fg=MUTED, anchor="w", font=("Consolas", 10)).pack(side="left")
+            ttk.Label(body, text="Le navigateur crée un fichier .csv qui contient tes mots de passe EN CLAIR : "
+                                 "CoffreFort te proposera de l'effacer juste après l'import. Exports de Bitwarden, "
+                                 "LastPass et autres gestionnaires acceptés aussi.",
+                      style="Muted.TLabel", wraplength=760, justify="left").pack(anchor="w")
+            ttk.Button(body, text="2. Choisir le fichier exporté (.csv)…", style="Accent.TButton",
+                       command=choose).pack(anchor="w", pady=(16, 0))
+
+        def choose():
+            path = filedialog.askopenfilename(parent=d, title="Fichier de mots de passe exporté",
+                                              initialdir=os.path.join(os.path.expanduser("~"), "Downloads"),
+                                              filetypes=[("Export CSV", "*.csv"), ("Tous les fichiers", "*.*")])
+            if not path:
+                return
+            try:
+                items = importer.read_csv(path)
+            except (OSError, importer.ImportError_) as ex:
+                messagebox.showerror("Import impossible", str(ex), parent=d)
+                return
+            if not items:
+                messagebox.showinfo("Import", "Aucun mot de passe dans ce fichier.", parent=d)
+                return
+            importer.compare(items, self.vault.entries)
+            step2(path, items)
+
+        def step2(path, items):
+            for w in body.winfo_children():
+                w.destroy()
+            n_new = sum(i["state"] == "new" for i in items)
+            n_same = sum(i["state"] == "same" for i in items)
+            n_changed = sum(i["state"] == "changed" for i in items)
+            ttk.Label(body, text=f"{len(items)} comptes dans {os.path.basename(path)} : {n_new} nouveaux"
+                                 + (f" · {n_same} déjà dans CoffreFort" if n_same else "")
+                                 + (f" · {n_changed} avec un mot de passe différent" if n_changed else "")
+                                 + ".\nCoche ceux à importer (clic sur une ligne ou barre Espace). Pour un compte « Autre "
+                                   "mot de passe », CoffreFort te demandera : remplacer, garder les deux, ou ne pas importer.",
+                      style="Panel.TLabel", justify="left").pack(anchor="w")
+            tools = ttk.Frame(body, style="Panel.TFrame")
+            tools.pack(fill="x", pady=(8, 6))
+            query = tk.StringVar()
+            ttk.Entry(tools, textvariable=query, width=28).pack(side="left")
+            ttk.Label(tools, text="  🔍", style="Panel.TLabel").pack(side="left")
+
+            def set_all(value, only=None):
+                for i in shown():
+                    if only is None or i["state"] == only:
+                        i["checked"] = value
+                fill()
+            ttk.Button(tools, text="Tout décocher", style="Card.TButton",
+                       command=lambda: set_all(False)).pack(side="right")
+            ttk.Button(tools, text="Tout cocher", style="Card.TButton",
+                       command=lambda: set_all(True)).pack(side="right", padx=6)
+            ttk.Button(tools, text="Cocher les nouveaux", style="Card.TButton",
+                       command=lambda: (set_all(False), set_all(True, "new"))).pack(side="right")
+
+            frame = ttk.Frame(body, style="Panel.TFrame")
+            frame.pack(fill="both", expand=True)
+            tree = ttk.Treeview(frame, columns=("site", "login", "state"), show="headings", selectmode="browse")
+            for c, title, width in (("site", "Site", 300), ("login", "Identifiant", 230), ("state", "État", 210)):
+                tree.heading(c, text=title, anchor="w")
+                tree.column(c, width=width, anchor="w")
+            bar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+            tree.configure(yscrollcommand=bar.set)
+            tree.pack(side="left", fill="both", expand=True)
+            bar.pack(side="right", fill="y")
+            states = {"new": "Nouveau", "same": "Déjà dans CoffreFort",
+                      "changed": "Autre mot de passe (on te demandera)"}
+
+            def shown():
+                q = query.get().strip().lower()
+                return [i for i in items if not q or q in i["site"].lower() or q in i["url"].lower()
+                        or q in (i["username"] + i["email"]).lower()]
+
+            bottom = ttk.Frame(body, style="Panel.TFrame")
+            bottom.pack(fill="x", pady=(10, 0))
+            ttk.Label(bottom, text="Ranger les nouveaux dans :", style="Panel.TLabel").pack(side="left")
+            cat = tk.StringVar(value="(aucune)")
+            ttk.Combobox(bottom, textvariable=cat, state="readonly", width=20,
+                         values=["(aucune)"] + list(self.vault.categories)).pack(side="left", padx=6)
+            go = ttk.Button(bottom, style="Accent.TButton", command=lambda: do_import(path, items, cat.get()))
+            go.pack(side="right")
+            ttk.Button(bottom, text="Annuler", command=d.destroy).pack(side="right", padx=6)
+
+            def fill():
+                keep = tree.selection()
+                tree.delete(*tree.get_children())
+                for idx, i in enumerate(items):
+                    if i in shown():
+                        tree.insert("", "end", iid=str(idx), values=(("☑  " if i["checked"] else "☐  ") + i["site"],
+                                                                     i["username"] or i["email"], states[i["state"]]))
+                if keep and tree.exists(keep[0]):
+                    tree.selection_set(keep[0])
+                n = sum(i["checked"] for i in items)
+                go.config(text=f"Importer {n} compte{'s' if n > 1 else ''}")
+                go.state(["!disabled"] if n else ["disabled"])
+
+            def toggle(iid):
+                if iid:
+                    items[int(iid)]["checked"] = not items[int(iid)]["checked"]
+                    fill()
+            tree.bind("<ButtonRelease-1>", lambda ev: tree.identify_region(ev.x, ev.y) == "cell"
+                      and toggle(tree.identify_row(ev.y)))
+            tree.bind("<space>", lambda ev: toggle(tree.focus()))
+            query.trace_add("write", lambda *_: fill())
+            fill()
+
+        def ask_conflict(it, remaining):
+            """Même compte avec un autre mot de passe : on demande, rien n'est remplacé d'office."""
+            twin = next((e for e in self.vault.entries if e["id"] == it["twin"]), None)
+            q = tk.Toplevel(d)
+            q.title("Mot de passe différent")
+            q.configure(bg=PANEL)
+            q.transient(d)
+            q.resizable(False, False)
+            q.grab_set()
+            box = ttk.Frame(q, style="Panel.TFrame", padding=20)
+            box.pack(fill="both", expand=True)
+            who = it["username"] or it["email"]
+            ttk.Label(box, text=f"{it['site']}  ·  {who}", style="Panel.TLabel",
+                      font=("Segoe UI Semibold", 13)).pack(anchor="w")
+            ttk.Label(box, text="Ce compte est déjà dans CoffreFort, avec un autre mot de passe.",
+                      style="Panel.TLabel").pack(anchor="w", pady=(4, 10))
+            shown = tk.BooleanVar(value=False)
+            rows = []
+            for label, pw in (("Dans CoffreFort", twin["password"] if twin else ""),
+                              ("Dans le navigateur", it["password"])):
+                r = tk.Frame(box, bg=CARD, padx=12, pady=6)
+                r.pack(fill="x", pady=2)
+                tk.Label(r, text=label, bg=CARD, fg=MUTED, width=18, anchor="w", font=("Segoe UI", 9)).pack(side="left")
+                v = tk.Label(r, text="•" * 12, bg=CARD, fg=FG, anchor="w", font=("Consolas", 11))
+                v.pack(side="left")
+                rows.append((v, pw))
+
+            def toggle():
+                shown.set(not shown.get())
+                for v, pw in rows:
+                    v.config(text=pw if shown.get() else "•" * 12)
+            ttk.Button(box, text="Afficher les deux", style="Card.TButton", command=toggle).pack(anchor="w", pady=(6, 0))
+            same_for_all = tk.BooleanVar(value=False)
+            if remaining > 1:
+                ttk.Checkbutton(box, text=f"Même choix pour les {remaining - 1} autres comptes dans ce cas",
+                                variable=same_for_all).pack(anchor="w", pady=(10, 0))
+            answer = {"choice": "skip"}
+
+            def pick(choice):
+                answer["choice"] = choice
+                q.destroy()
+            btns = ttk.Frame(box, style="Panel.TFrame")
+            btns.pack(fill="x", pady=(14, 0))
+            ttk.Button(btns, text="Remplacer celui de CoffreFort", style="Accent.TButton",
+                       command=lambda: pick("replace")).pack(side="left")
+            ttk.Button(btns, text="Garder les deux (doublon)", command=lambda: pick("duplicate")).pack(side="left", padx=6)
+            ttk.Button(btns, text="Ne pas importer", command=lambda: pick("skip")).pack(side="left")
+            q.protocol("WM_DELETE_WINDOW", lambda: pick("skip"))
+            q.wait_window()
+            return answer["choice"], same_for_all.get()
+
+        def do_import(path, items, category):
+            chosen = [i for i in items if i["checked"]]
+            new = [i for i in chosen if i["state"] != "changed"]
+            replaced = []
+            conflicts = [i for i in chosen if i["state"] == "changed"]
+            remembered = None
+            for n, it in enumerate(conflicts):
+                choice = remembered
+                if choice is None:
+                    choice, for_all = ask_conflict(it, len(conflicts) - n)
+                    if for_all:
+                        remembered = choice
+                if choice == "replace":
+                    replaced.append(it)
+                elif choice == "duplicate":
+                    new.append(it)
+            if not new and not replaced:
+                return
+            category = "" if category == "(aucune)" else category
+
+            def work():
+                self.vault.add_many(new, category)
+                for i in replaced:
+                    self.vault.update(i["twin"], password=i["password"])
+            if self._busy(work) is False:
+                return
+            self.filter = "all"
+            self._render_sidebar()
+            self.refresh_list()
+            self.show_details()
+            self.set_status(f"Import : {len(new)} compte(s) ajouté(s), {len(replaced)} mot(s) de passe remplacé(s).")
+            for w in body.winfo_children():
+                w.destroy()
+            ttk.Label(body, text=f"✔  {len(new)} compte{'s' if len(new) > 1 else ''} importé{'s' if len(new) > 1 else ''}"
+                                 + (f", {len(replaced)} mot{'s' if len(replaced) > 1 else ''} de passe remplacé"
+                                    f"{'s' if len(replaced) > 1 else ''}" if replaced else "") + ".",
+                      style="Panel.TLabel", font=("Segoe UI Semibold", 12)).pack(anchor="w", pady=(10, 6))
+            warn = tk.Frame(body, bg="#33281f", padx=14, pady=12)
+            warn.pack(fill="x", pady=(6, 0))
+            tk.Label(warn, text="⚠  Le fichier exporté contient tous tes mots de passe EN CLAIR :\n" + path,
+                     bg="#33281f", fg=WARN, justify="left", anchor="w", wraplength=740,
+                     font=("Segoe UI", 10)).pack(fill="x")
+            tk.Label(warn, text="Efface-le maintenant. Pense aussi à supprimer les mots de passe enregistrés dans le "
+                                "navigateur si tu n'utilises plus que CoffreFort.", bg="#33281f", fg=MUTED,
+                     justify="left", anchor="w", wraplength=740, font=("Segoe UI", 9)).pack(fill="x", pady=(4, 8))
+            done = ttk.Frame(body, style="Panel.TFrame")
+            done.pack(fill="x", pady=(12, 0))
+
+            def wipe():
+                try:
+                    importer.wipe(path)
+                except OSError as ex:
+                    messagebox.showerror("Effacement impossible", str(ex), parent=d)
+                    return
+                d.destroy()
+                self.set_status("Fichier exporté effacé.")
+            ttk.Button(done, text="Effacer le fichier", style="Accent.TButton", command=wipe).pack(side="left")
+            ttk.Button(done, text="Le garder", command=d.destroy).pack(side="left", padx=6)
+
+        step1()
 
     def manage_extensions(self):
         d = self._dialog("Extensions navigateur")

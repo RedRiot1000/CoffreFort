@@ -188,3 +188,34 @@ Chaque fiche de compte concerné affiche aussi l'alerte. « Changer » ouvre la 
 caractères de l'empreinte SHA-1 du mot de passe sont envoyés, le service renvoie des centaines
 d'empreintes qui commencent pareil, et la comparaison se fait sur le PC. Ni le mot de passe ni son
 empreinte complète ne quittent le PC. Une fois activée, elle se refait au plus une fois par jour.
+
+## Importer depuis le navigateur (⚙ Réglages → Importer depuis le navigateur…)
+
+1. Exporte les mots de passe depuis le navigateur (adresse à taper dans sa barre) :
+   - Chrome : `chrome://password-manager/settings` → Exporter les mots de passe
+   - Brave : `brave://password-manager/settings` · Opera / Opera GX : `opera://password-manager/settings`
+   - Edge : `edge://wallet/passwords` → ⋯ → Exporter · Firefox : `about:logins` → ⋯ → Exporter
+2. Dans CoffreFort, choisis le fichier `.csv` créé.
+3. **Coche les comptes à importer.** Les nouveaux sont cochés ; ceux déjà dans CoffreFort sont décochés ;
+   « Autre mot de passe » = même compte avec un mot de passe différent : s'il est coché, CoffreFort te demande
+   pour chacun « Remplacer », « Garder les deux (doublon) » ou « Ne pas importer » (rien n'est remplacé d'office).
+   Recherche, Tout cocher / décocher, et choix d'une catégorie pour les nouveaux.
+4. **Efface le fichier exporté** quand CoffreFort le propose : il contient tes mots de passe en clair.
+
+Les exports de Bitwarden, LastPass et la plupart des gestionnaires (CSV) sont aussi acceptés.
+Quand le coffre est vide, le lien d'import apparaît directement dans la liste.
+
+## Générateur de mots de passe (🎲 Générateur, ou 🎲 Générer dans une fiche)
+
+Trois modes, tous réglables, et tes réglages sont retenus :
+- **Caractères aléatoires** : longueur 4 à 128 ; minuscules, majuscules, chiffres, caractères spéciaux avec un
+  minimum pour chacun ; chiffres et caractères spéciaux **mélangés partout, au début, à la fin, au milieu ou aux deux
+  bords** ; liste des caractères spéciaux modifiable ; caractères interdits ; éviter les ambigus (l 1 I O 0) ;
+  commencer par une lettre ; jamais deux fois le même caractère à la suite.
+- **Mots français** (phrase de passe facile à retenir, ~1700 mots) : nombre de mots, séparateur (tiret, point,
+  espace, aucun, chiffre ou symbole au hasard, ou le tien), majuscules (initiale, minuscules, MAJUSCULES, au hasard,
+  une seule), chiffres et caractères spéciaux à la fin, au début, au milieu, entre les mots ou n'importe où,
+  longueur des mots.
+- **Code PIN** : 4 à 12 chiffres.
+
+La barre indique l'aléa réel du réglage (en bits) et le temps moyen qu'il faudrait pour le deviner.

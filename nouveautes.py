@@ -5,6 +5,15 @@
 """
 
 NOTES = [
+    (15, "Générateur sur mesure et import depuis le navigateur", [
+        "Générateur entièrement personnalisable : caractères aléatoires, phrases de mots français ou code PIN. "
+        "Longueur, minimums, place des chiffres et symboles (début, milieu, fin…), séparateurs, majuscules… Tes réglages sont retenus.",
+        "⚙ Réglages → Importer depuis le navigateur… : récupère les mots de passe enregistrés dans Chrome, Brave, "
+        "Opera GX, Edge ou Firefox.",
+        "Tu coches les comptes à importer ; ceux déjà dans CoffreFort sont repérés et décochés. Si un compte existe "
+        "avec un autre mot de passe, CoffreFort te demande : remplacer, garder les deux ou ne pas importer.",
+        "CoffreFort efface ensuite le fichier exporté, qui contenait tes mots de passe en clair.",
+    ]),
     (14, "Santé du coffre", [
         "Nouveau dans la barre de gauche : 🩺 Santé du coffre. Elle repère les mots de passe faibles, "
         "réutilisés (ou presque identiques) et ceux pas changés depuis plus d'un an, avec une note sur 100.",
